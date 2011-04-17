@@ -13,24 +13,49 @@ instance Thread t => Thread (Rfork t)
 
 -- how to hide this implementation?
 -- K (writing_destination writing_action)
-newtype Thread t =>
-    K t a = K (IO (MV.MVar a), IO a)
+newtype Thread t => K t a = K (IO (MV.MVar a), IO a)
 
-receive :: K t a -> IO a
-receive (K (d, _)) = d >>= MV.readMVar
+class IOFunctor w where
+  wmap :: (a -> IO b) -> w a -> IO (w b)
 
--- which remote to take?  Experiment!
+instance IOFunctor (K t) where
+  wmap f (K (_, x)) = return $ K (e, y)
+    where
+      e = MV.newEmptyMVar
+      y = x >>= f
 
-remote :: (a -> IO b) -> K t a -> K t b
-remote f (K (_, x)) = K (e, y)
-  where
-    y = x >>= f
-    e = MV.newEmptyMVar
+(>=>)       :: Monad m => (a -> m b) -> (b -> m c) -> (a -> m c)
+f >=> g     = \x -> f x >>= g
 
-ret :: a -> K t a
-ret y = K (e, return y)
-  where
-    e = MV.newEmptyMVar
+          
+-- IOComonad. to be moved 
+class IOFunctor w => IOComonad w where
+   extract :: w a -> IO a
+   duplicate :: w a -> IO (w (w a))
+   extend :: (w a -> IO b) -> w a -> IO (w b)
+
+   extend f =  duplicate >=> wmap f
+--   duplicate = extend id
+
+-- (=>>) :: IOComonad w => w a -> (w a -> IO b) -> IO (w b)
+
+    
+-- instance F.Representable (K t) where
+    
+
+
+-- -- which remote to take?  Experiment!
+
+-- remote :: (a -> IO b) -> K t a -> K t b
+-- remote f (K (_, x)) = K (e, y)
+--   where
+--     y = x >>= f
+--     e = MV.newEmptyMVar
+
+-- ret :: a -> K t a
+-- ret y = K (e, return y)
+--   where
+--     e = MV.newEmptyMVar
 
 -- remote :: (a -> IO b) -> K t a -> K t b
 -- remote f (K (_, x)) = K (e, y)
