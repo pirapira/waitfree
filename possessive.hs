@@ -35,7 +35,24 @@ class IOFunctor w => IOComonad w where
    extend :: (w a -> IO b) -> w a -> IO (w b)
 
    extend f =  duplicate >=> wmap f
---   duplicate = extend id
+   duplicate = extend return
+
+-- add nice notation for IOComonad
+-- add law for IOComonad
+
+-- | 'extend' with the arguments swapped. Dual to '>>=' for monads.
+(=>>) :: IOComonad w => w a -> (w a -> IO b) -> IO (w b)
+(=>>) = flip extend
+
+-- | Injects a value into the comonad.
+(.>>) :: IOComonad w => w a -> b -> IO (w b)
+w .>> b = extend (\_ -> return b) w
+
+instance IOComonad (K t) where
+    extract (K (d, _)) = d >>= MV.readMVar
+    duplicate (K (d, x)) =
+        return $ K (d', return $ K (d, x))
+            where d' = MV.newEmptyMVar
 
 -- (=>>) :: IOComonad w => w a -> (w a -> IO b) -> IO (w b)
 
@@ -46,11 +63,9 @@ class IOFunctor w => IOComonad w where
 
 -- -- which remote to take?  Experiment!
 
--- remote :: (a -> IO b) -> K t a -> K t b
--- remote f (K (_, x)) = K (e, y)
---   where
---     y = x >>= f
---     e = MV.newEmptyMVar
+-- remote :: (a -> IO b) -> K t a -> IO (K t b)
+-- remote = wmap
+
 
 -- ret :: a -> K t a
 -- ret y = K (e, return y)
@@ -63,6 +78,11 @@ class IOFunctor w => IOComonad w where
 --     y = x >>= f
 --     e = y >>= MV.newMVar
 
+
+-- the waitfree communication
+-- waitfree :: K t a -> K s b -> Eigher (K t b) (K s a)
+-- waitfree = ?
+
 -- these are internal
 
 -- action of sending the result to the shared box
@@ -71,3 +91,9 @@ job (K (d, c)) = do
   d' <- d
   c' <- c
   MV.putMVar d' c'
+
+-- example
+
+-- a takes input
+-- b takes input
+-- either a or b
