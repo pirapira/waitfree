@@ -88,6 +88,17 @@ ret y = K (t, e, return y)
    where
      e = MV.newEmptyMVar
 
+
+-- internal representation of a job
+newtype L a = L (Thread_, IO (MV.MVar a), IO a)
+
+ktol :: Thread t => K t a -> L a
+ktol (K (th, d, f)) = L (t_ th, d, f)
+
+(//) :: Thread t => K t () -> [L ()] -> [L ()]
+(//) hd tl = (ktol hd) : tl
+
+
 -- the waitfree communication
 -- waitfree :: K t a -> K s b -> Eigher (K t b) (K s a)
 -- waitfree = ?
@@ -96,12 +107,15 @@ ret y = K (t, e, return y)
 
 
 -- action of sending the result to the shared box
-job :: K t a -> IO ()
-job (K (_, d, c)) = do
+-- this should not be visible to the user.
+job_action :: L a -> IO ()
+job_action (L (_, d, c)) = do
   d' <- d
   c' <- c
   MV.putMVar d' c'
 
+
+    
 --------------------------------------------------
 -- example simple
 
@@ -109,24 +123,18 @@ job (K (_, d, c)) = do
 -- Left shows "left\n"
 -- and they are done.
 
-spawnMain :: K MainT ()
-spawnMain = spawn
+l :: K (Lfork MainT) ()
+l = spawn .>> putStrLn "left"
 
-showMain  :: IO ()
-showMain = putStrLn "main"
+m :: K MainT ()
+m = spawn .>> putStrLn "main"
 
-kMain :: K MainT ()
-kMain = spawnMain .>> showMain
-           
-            
-spwanLeft :: K (Lfork MainT) ()
-spwanLeft = spawn
+-- xxx joblist should contain no parenthesis
 
-showLeft :: IO ()
-showLeft = putStrLn "left"
+joblist :: [L ()]
+joblist = l // (m // [])
 
-
-
+    
 -- example waitfree
 
 -- a takes input
