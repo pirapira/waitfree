@@ -32,10 +32,10 @@ spawn = K (t, d, return ())
     where d = MV.newEmptyMVar
     
 class IOFunctor w where
-  wmap :: (a -> IO b) -> w a -> IO (w b)
+  wmap :: (a -> IO b) -> w a -> w b
 
 instance Thread t => IOFunctor (K t) where
-  wmap f (K (_, _, x)) = return $ K (t, e, y)
+  wmap f (K (_, _, x)) = K (t, e, y)
     where
       e = MV.newEmptyMVar
       y = x >>= f
@@ -47,26 +47,27 @@ f >=> g     = \x -> f x >>= g
 -- IOComonad. to be moved 
 class IOFunctor w => IOComonad w where
    extract :: w a -> IO a
-   duplicate :: w a -> IO (w (w a))
-   extend :: (w a -> IO b) -> w a -> IO (w b)
+   duplicate :: w a -> w (w a)
+   extend :: (w a -> IO b) -> w a -> w b
 
-   extend f =  duplicate >=> wmap f
+   extend f = g . duplicate
+       where g = wmap f
    duplicate = extend return
 
 -- xxx add law for IOComonad
 
 -- | 'extend' with the arguments swapped. Dual to '>>=' for monads.
-(=>>) :: IOComonad w => w a -> (w a -> IO b) -> IO (w b)
+(=>>) :: IOComonad w => w a -> (w a -> IO b) -> w b
 (=>>) = flip extend
 
 -- | Injects a value into the comonad.
-(.>>) :: IOComonad w => w a -> IO b -> IO (w b)
+(.>>) :: IOComonad w => w a -> IO b -> w b
 w .>> b = extend (\_ -> b) w
 
 instance Thread t => IOComonad (K t) where
     extract (K (_, d, _)) = d >>= MV.readMVar
     duplicate (K (s, d, x)) =
-        return $ K (t, d', return $ K (s, d, x))
+        K (t, d', return $ K (s, d, x))
             where d' = MV.newEmptyMVar
 
 -- (=>>) :: IOComonad w => w a -> (w a -> IO b) -> IO (w b)
@@ -78,7 +79,7 @@ instance Thread t => IOComonad (K t) where
 
 -- -- which remote to take?  Experiment!
 
-remote :: Thread t => (a -> IO b) -> K t a -> IO (K t b)
+remote :: Thread t => (a -> IO b) -> K t a -> K t b
 remote = wmap
 
 
@@ -114,7 +115,7 @@ spawnMain = spawn
 showMain  :: IO ()
 showMain = putStrLn "main"
 
-kMain :: IO (K MainT ())
+kMain :: K MainT ()
 kMain = spawnMain .>> showMain
            
             
