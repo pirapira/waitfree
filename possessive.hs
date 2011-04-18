@@ -60,8 +60,8 @@ class IOFunctor w => IOComonad w where
 (=>>) = flip extend
 
 -- | Injects a value into the comonad.
-(.>>) :: IOComonad w => w a -> b -> IO (w b)
-w .>> b = extend (\_ -> return b) w
+(.>>) :: IOComonad w => w a -> IO b -> IO (w b)
+w .>> b = extend (\_ -> b) w
 
 instance Thread t => IOComonad (K t) where
     extract (K (_, d, _)) = d >>= MV.readMVar
@@ -78,29 +78,20 @@ instance Thread t => IOComonad (K t) where
 
 -- -- which remote to take?  Experiment!
 
--- remote :: (a -> IO b) -> K t a -> IO (K t b)
--- remote = wmap
+remote :: Thread t => (a -> IO b) -> K t a -> IO (K t b)
+remote = wmap
 
 
--- ret :: a -> K t a
--- ret y = K (e, return y)
---   where
---     e = MV.newEmptyMVar
-
--- remote :: (a -> IO b) -> K t a -> K t b
--- remote f (K (_, x)) = K (e, y)
---   where
---     y = x >>= f
---     e = y >>= MV.newMVar
-
+ret :: Thread t => a -> K t a
+ret y = K (t, e, return y)
+   where
+     e = MV.newEmptyMVar
 
 -- the waitfree communication
 -- waitfree :: K t a -> K s b -> Eigher (K t b) (K s a)
 -- waitfree = ?
 
 -- these are internal
-
-
 
 
 -- action of sending the result to the shared box
@@ -120,6 +111,18 @@ job (K (_, d, c)) = do
 spawnMain :: K MainT ()
 spawnMain = spawn
 
+showMain  :: IO ()
+showMain = putStrLn "main"
+
+kMain :: IO (K MainT ())
+kMain = spawnMain .>> showMain
+           
+            
+spwanLeft :: K (Lfork MainT) ()
+spwanLeft = spawn
+
+showLeft :: IO ()
+showLeft = putStrLn "left"
 
 
 
