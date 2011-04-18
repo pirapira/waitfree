@@ -1,15 +1,15 @@
 module Possessive where
 
+import Control.Concurrent (ThreadId, forkIO)
 import qualified Control.Concurrent.MVar as MV
+import qualified Control.Concurrent.Chan as Ch
+import qualified Data.Map as Map
 
 data ZeroT = ZeroT
 data SucT t = SucT t
 
 -- xxx internal data for thread id's -- hidden
-newtype AbstractThreadId = ATId Integer
-
-asucc :: AbstractThreadId -> AbstractThreadId
-asucc (ATId x) = ATId $ succ x
+type AbstractThreadId = Integer
 
 class Thread t where
     t :: t
@@ -17,10 +17,10 @@ class Thread t where
 
 instance Thread ZeroT where
     t = ZeroT
-    atid _ = ATId 0
+    atid _ = 0
 instance Thread t => Thread (SucT t) where
     t = SucT t
-    atid = asucc . atid
+    atid = succ . atid
 
 -- how to hide this implementation?
 -- K (writing_destination writing_action)
@@ -89,10 +89,10 @@ ret y = K (t, e, return y)
 
 
 -- internal representation of a job
-newtype L a = L (AbstractThreadId, IO (MV.MVar a), IO a)
+newtype L a = L (AbstractThreadId, IO ())
 
 ktol :: Thread t => K t a -> L a
-ktol (K (th, d, f)) = L (atid th, d, f)
+ktol (K (th, d, f)) = L (atid th, job_action d f)
 
 (//) :: Thread t => K t () -> [L ()] -> [L ()]
 (//) hd tl = (ktol hd) : tl
@@ -102,17 +102,47 @@ ktol (K (th, d, f)) = L (atid th, d, f)
 -- waitfree :: K t a -> K s b -> Eigher (K t b) (K s a)
 -- waitfree = ?
 
--- these are internal
 
+
+-- these are internal
 
 -- action of sending the result to the shared box
 -- this should not be visible to the user.
-job_action :: L a -> IO ()
-job_action (L (_, d, c)) = do
+job_action :: IO (MV.MVar a) -> IO a -> IO ()
+job_action d c = do
   d' <- d
   c' <- c
   MV.putMVar d' c'
 
+
+-- ThreadPool is finite map AbstractThreadId -> (ThreadId, Ch.Chan (IO ()))
+type ThreadPool =
+    Map.Map AbstractThreadId
+           (ThreadId, Ch.Chan (IO ()), MV.MVar ())
+
+addJob :: IO () -> ThreadPool -> AbstractThreadId -> IO () -> IO ThreadPool
+addJob current p aid action =
+    case Map.lookup aid p of
+      Nothing ->
+          do
+            channel <- Ch.newChan
+            Ch.writeChan channel action
+            thid <- forkIO current
+            finish_flag <- MV.newEmptyMVar
+            return $ Map.insert aid (thid, channel, finish_flag) p
+                               
+        
+
+waitThread :: ThreadPool -> IO ()
+waitThread = undefined
+
+    
+-- execution
+spawnJobList :: IO () -> ThreadPool -> [L ()] -> IO ThreadPool
+spawnJobList _ p [] = return p
+spawnJobList current p (L (aid, action) : tl) = do
+  newp <- addJob current p aid action
+  spawnJobList current newp tl
 
     
 --------------------------------------------------
