@@ -3,6 +3,8 @@
 import Control.Concurrent (ThreadId, forkIO, killThread)
 import qualified Control.Concurrent.MVar as MV
 import qualified Data.Map as Map
+import GHC.IO.Handle (hFlush)
+import System.IO (stdout)
 
 data ZeroT = ZeroT
 data SucT t = SucT t
@@ -52,6 +54,9 @@ class IOFunctor w => IOComonad w where
        where g = wmap f
    duplicate = extend return
 
+mute :: K t a -> IO ()
+mute _ = return ()
+
 -- xxx add law for IOComonad
 
 -- | 'extend' with the arguments swapped. Dual to '>>=' for monads.
@@ -63,10 +68,19 @@ class IOFunctor w => IOComonad w where
 w .>> b = extend (\_ -> b) w
 
 instance Thread t => IOComonad (K t) where
-    extract (K (_, d, _)) = d >>= MV.readMVar
-    duplicate (K (s, d, x)) =
-        K (t, d', return $ K (s, d, x))
-            where d' = MV.newEmptyMVar
+    extract (K (_, d, _)) = do
+      putStrLn "waiting"
+      val <- (d >>= MV.readMVar)
+      putStrLn "got value"
+      return val
+    extend trans (K (s, d, f)) = K (t, d', f')
+        where
+          d' = MV.newEmptyMVar
+          f' = do
+            d_ <- d'
+            f_ <- f
+            MV.putMVar d_ f_
+            trans $ K (s, d, f)
 
 -- (=>>) :: IOComonad w => w a -> (w a -> IO b) -> IO (w b)
 
@@ -77,8 +91,8 @@ remote :: Thread t => (a -> IO b) -> K t a -> K t b
 remote = wmap
 
 
-ret :: Thread t => a -> K t a
-ret y = K (t, e, return y)
+ret :: Thread t => IO a -> K t a
+ret y = K (t, e, y)
    where
      e = MV.newEmptyMVar
 
@@ -86,8 +100,10 @@ ret y = K (t, e, return y)
 -- internal representation of a job
 newtype L a = L (AbstractThreadId, IO ())
 
-ktol :: Thread t => K t a -> L a
+ktol :: Thread t => Show a => K t a -> L a
 ktol (K (th, d, f)) = L (atid th, job_action d f)
+
+infixr 5 //
 
 (//) :: Thread t => K t () -> [L ()] -> [L ()]
 (//) hd tl = (ktol hd) : tl
@@ -103,10 +119,11 @@ ktol (K (th, d, f)) = L (atid th, job_action d f)
 
 -- action of sending the result to the shared box
 -- this should not be visible to the user.
-job_action :: IO (MV.MVar a) -> IO a -> IO ()
+job_action :: Show a => IO (MV.MVar a) -> IO a -> IO ()
 job_action d c = do
   d' <- d
   c' <- c
+  putStrLn $ show c'
   MV.putMVar d' c'
 
 type JobChannel = [IO ()]
@@ -153,32 +170,48 @@ waitThread :: ThreadPool -> IO ()
 waitThread = Map.fold threadWait $ return ()
 
 threadWait :: (ThreadId, MV.MVar ()) -> IO () -> IO ()
-threadWait (thid, fin) _ = do
+threadWait (thid, fin) w = do
     MV.readMVar fin
+    putStrLn "detect finish"
     killThread thid
-    return ()
+    w
     
 --------------------------------------------------
--- example simple
-
--- Main shows "main\n"
--- Left shows "left\n"
--- and they are done.
+-- example embarrasingly parallel
 
 l :: K (SucT ZeroT) ()
-l = spawn .>> putStrLn "on"
+l = spawn .>> putStrLn "one"
 
 m :: K ZeroT ()
 m = spawn .>> putStrLn "zero"
 
--- xxx joblist should contain no parenthesis
+embarassingly_parallel = l // m // []    
 
-joblist :: [L ()]
-joblist = l // (m // [])
 
+--------------------------------------------------
+-- example ping_pong
+
+reader :: K ZeroT String
+reader = ret $ do
+           putStrLn $ "reader start"
+           hFlush stdout
+           str <- getLine
+           putStrLn $ "reader got: " ++ str
+           return str
+
+reader' :: K ZeroT ()
+reader' = extend mute reader
+         
+writer :: K (SucT ZeroT) ()
+writer = ret $ do
+           putStrLn $ "writer start"
+           str <- extract reader
+           putStrLn $ "writer got" ++ str
+           
+reader_writer = reader' // writer // []
 
 main :: IO ()
-main = execute joblist
+main = execute $ reader_writer
     
 -- example waitfree
 
