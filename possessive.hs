@@ -2,7 +2,6 @@ module Possessive where
 
 import Control.Concurrent (ThreadId, forkIO)
 import qualified Control.Concurrent.MVar as MV
-import qualified Control.Concurrent.Chan as Ch
 import qualified Data.Map as Map
 
 data ZeroT = ZeroT
@@ -114,67 +113,43 @@ job_action d c = do
   c' <- c
   MV.putMVar d' c'
 
-type JobChannel = Ch.Chan (Maybe (IO ()))
+type JobChannel = [IO ()]
 -- Just x is a next job
 -- Nothing means this is the end
 
 worker :: JobChannel -> MV.MVar () -> IO ()
-worker ch fin = do
-  next <- Ch.readChan ch
-  case next of
-    Nothing ->
-        MV.putMVar fin ()
-    Just action -> do
-        action
-        worker ch fin
+worker [] fin = MV.putMVar fin ()
+worker (hd : tl) fin = do
+  hd
+  worker tl fin
 
 -- ThreadPool is finite map
-type ThreadPool =
-    Map.Map AbstractThreadId
-           (ThreadId, JobChannel, MV.MVar ())
+type JobPool = 
+    Map.Map AbstractThreadId JobChannel
 
-addJob :: ThreadPool -> AbstractThreadId -> IO () -> IO ThreadPool
+type ThreadPool =
+    Map.Map AbstractThreadId (ThreadId, MV.MVar ())
+
+addJob :: JobPool -> AbstractThreadId -> IO () -> JobPool
 addJob p aid action =
-    case Map.lookup aid p of
-      Nothing ->
-          do
-            jobChannel <- Ch.newChan
-            Ch.writeChan jobChannel $ Just action
-            finishFlag <- MV.newEmptyMVar
-            thid <- forkIO $ worker jobChannel finishFlag
-            return $ Map.insert aid (thid, jobChannel, finishFlag) p
-      Just (_, jobChannel, _) ->
-          do
-            Ch.writeChan jobChannel $ Just action
-            return p
+    Map.insertWith (++) aid [action] p
 
 waitThread :: ThreadPool -> IO ()
 waitThread = undefined
 
-    
+run :: JobPool -> IO ThreadPool
+run = undefined
+             
 -- execution
-spawnJobList :: ThreadPool -> [L ()] -> IO ThreadPool
-spawnJobList p lst = do
-  p' <- addJobList p lst
-  terminateJobList p' -- add Nothing to each one.
+spawnPool :: [L ()] -> IO ThreadPool
+spawnPool = run . constructJobPool
 
-addJobList :: ThreadPool -> [L ()] -> IO ThreadPool
-addJobList p [] = return p
-addJobList p (L (aid, action) : tl) = do
-  newp <- addJob p aid action
-  addJobList newp tl
+constructJobPool :: [L ()] -> JobPool
+constructJobPool [] = Map.empty
+constructJobPool (L (aid, action) : tl) =
+  addJob rest aid action
+    where rest = constructJobPool tl
 
-mapIO :: (a -> IO b) -> Map.Map k a -> IO (Map.Map k b)
-mapIO = undefined
-
-terminateJobList :: ThreadPool -> IO ThreadPool
-terminateJobList p = mapIO terminateJobChannelOfThread p
-    
-
-terminateJobChannelOfThread ::
-    (ThreadId, JobChannel, MV.MVar ()) ->
-    IO (ThreadId, JobChannel, MV.MVar ())
-terminateJobChannelOfThread = undefined        
     
 --------------------------------------------------
 -- example simple
