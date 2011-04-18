@@ -2,26 +2,25 @@ module Possessive where
 
 import qualified Control.Concurrent.MVar as MV
 
-data MainT = MainT
-data Lfork t = Lfork t
-data Rfork t = Rfork t
+data ZeroT = ZeroT
+data SucT t = SucT t
 
--- xxx internal data for thread id's
-data Thread_ = MainT_ | Lfork_ Thread_ | Rfork_ Thread_
+-- xxx internal data for thread id's -- hidden
+newtype AbstractThreadId = ATId Integer
+
+asucc :: AbstractThreadId -> AbstractThreadId
+asucc (ATId x) = ATId $ succ x
 
 class Thread t where
     t :: t
-    t_ :: t -> Thread_
+    atid  :: t -> AbstractThreadId
 
-instance Thread MainT where
-    t = MainT
-    t_ _ = MainT_
-instance Thread t => Thread (Lfork t) where
-    t = Lfork t
-    t_ = Lfork_ . t_
-instance Thread t => Thread (Rfork t) where
-    t = Rfork t
-    t_ = Rfork_ . t_
+instance Thread ZeroT where
+    t = ZeroT
+    atid _ = ATId 0
+instance Thread t => Thread (SucT t) where
+    t = SucT t
+    atid = asucc . atid
 
 -- how to hide this implementation?
 -- K (writing_destination writing_action)
@@ -90,10 +89,10 @@ ret y = K (t, e, return y)
 
 
 -- internal representation of a job
-newtype L a = L (Thread_, IO (MV.MVar a), IO a)
+newtype L a = L (AbstractThreadId, IO (MV.MVar a), IO a)
 
 ktol :: Thread t => K t a -> L a
-ktol (K (th, d, f)) = L (t_ th, d, f)
+ktol (K (th, d, f)) = L (atid th, d, f)
 
 (//) :: Thread t => K t () -> [L ()] -> [L ()]
 (//) hd tl = (ktol hd) : tl
@@ -123,10 +122,10 @@ job_action (L (_, d, c)) = do
 -- Left shows "left\n"
 -- and they are done.
 
-l :: K (Lfork MainT) ()
+l :: K (SucT ZeroT) ()
 l = spawn .>> putStrLn "left"
 
-m :: K MainT ()
+m :: K ZeroT ()
 m = spawn .>> putStrLn "main"
 
 -- xxx joblist should contain no parenthesis
