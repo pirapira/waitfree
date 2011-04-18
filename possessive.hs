@@ -6,20 +6,36 @@ data MainT = MainT
 data Lfork t = Lfork t
 data Rfork t = Rfork t
 
-class Thread t
-instance Thread MainT
-instance Thread t => Thread (Lfork t)
-instance Thread t => Thread (Rfork t)
+-- xxx internal data for thread id's
+data Thread_ = MainT_ | Lfork_ Thread_ | Rfork_ Thread_
+
+class Thread t where
+    t :: t
+    t_ :: t -> Thread_
+
+instance Thread MainT where
+    t = MainT
+    t_ _ = MainT_
+instance Thread t => Thread (Lfork t) where
+    t = Lfork t
+    t_ = Lfork_ . t_
+instance Thread t => Thread (Rfork t) where
+    t = Rfork t
+    t_ = Rfork_ . t_
 
 -- how to hide this implementation?
 -- K (writing_destination writing_action)
-newtype Thread t => K t a = K (IO (MV.MVar a), IO a)
+newtype K t a = K (t, IO (MV.MVar a), IO a)
 
+spawn :: Thread t => K t ()
+spawn = K (t, d, return ())
+    where d = MV.newEmptyMVar
+    
 class IOFunctor w where
   wmap :: (a -> IO b) -> w a -> IO (w b)
 
-instance IOFunctor (K t) where
-  wmap f (K (_, x)) = return $ K (e, y)
+instance Thread t => IOFunctor (K t) where
+  wmap f (K (_, _, x)) = return $ K (t, e, y)
     where
       e = MV.newEmptyMVar
       y = x >>= f
@@ -37,8 +53,7 @@ class IOFunctor w => IOComonad w where
    extend f =  duplicate >=> wmap f
    duplicate = extend return
 
--- add nice notation for IOComonad
--- add law for IOComonad
+-- xxx add law for IOComonad
 
 -- | 'extend' with the arguments swapped. Dual to '>>=' for monads.
 (=>>) :: IOComonad w => w a -> (w a -> IO b) -> IO (w b)
@@ -48,10 +63,10 @@ class IOFunctor w => IOComonad w where
 (.>>) :: IOComonad w => w a -> b -> IO (w b)
 w .>> b = extend (\_ -> return b) w
 
-instance IOComonad (K t) where
-    extract (K (d, _)) = d >>= MV.readMVar
-    duplicate (K (d, x)) =
-        return $ K (d', return $ K (d, x))
+instance Thread t => IOComonad (K t) where
+    extract (K (_, d, _)) = d >>= MV.readMVar
+    duplicate (K (s, d, x)) =
+        return $ K (t, d', return $ K (s, d, x))
             where d' = MV.newEmptyMVar
 
 -- (=>>) :: IOComonad w => w a -> (w a -> IO b) -> IO (w b)
@@ -85,15 +100,33 @@ instance IOComonad (K t) where
 
 -- these are internal
 
+
+
+
 -- action of sending the result to the shared box
 job :: K t a -> IO ()
-job (K (d, c)) = do
+job (K (_, d, c)) = do
   d' <- d
   c' <- c
   MV.putMVar d' c'
 
--- example
+--------------------------------------------------
+-- example simple
+
+-- Main shows "main\n"
+-- Left shows "left\n"
+-- and they are done.
+
+spawnMain :: K MainT ()
+spawnMain = spawn
+
+
+
+
+-- example waitfree
 
 -- a takes input
 -- b takes input
 -- either a or b
+
+
