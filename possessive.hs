@@ -114,22 +114,29 @@ job_action d c = do
   c' <- c
   MV.putMVar d' c'
 
+type JobChannel = Ch.Chan (Maybe (IO ()))
+-- Just x is a next job
+-- Nothing means this is the end
 
--- ThreadPool is finite map AbstractThreadId -> (ThreadId, Ch.Chan (IO ()))
+worker :: JobChannel -> MV.MVar () -> IO ()
+worker = undefined
+
+
+-- ThreadPool is finite map
 type ThreadPool =
     Map.Map AbstractThreadId
-           (ThreadId, Ch.Chan (IO ()), MV.MVar ())
+           (ThreadId, JobChannel, MV.MVar ())
 
-addJob :: IO () -> ThreadPool -> AbstractThreadId -> IO () -> IO ThreadPool
-addJob current p aid action =
+addJob :: ThreadPool -> AbstractThreadId -> IO () -> IO ThreadPool
+addJob p aid action =
     case Map.lookup aid p of
       Nothing ->
           do
-            channel <- Ch.newChan
-            Ch.writeChan channel action
-            thid <- forkIO current
-            finish_flag <- MV.newEmptyMVar
-            return $ Map.insert aid (thid, channel, finish_flag) p
+            jobChannel <- Ch.newChan
+            Ch.writeChan jobChannel $ Just action
+            finishFlag <- MV.newEmptyMVar
+            thid <- forkIO $ worker jobChannel finishFlag
+            return $ Map.insert aid (thid, jobChannel, finishFlag) p
                                
         
 
@@ -138,11 +145,11 @@ waitThread = undefined
 
     
 -- execution
-spawnJobList :: IO () -> ThreadPool -> [L ()] -> IO ThreadPool
-spawnJobList _ p [] = return p
-spawnJobList current p (L (aid, action) : tl) = do
-  newp <- addJob current p aid action
-  spawnJobList current newp tl
+spawnJobList :: ThreadPool -> [L ()] -> IO ThreadPool
+spawnJobList p [] = return p
+spawnJobList p (L (aid, action) : tl) = do
+  newp <- addJob p aid action
+  spawnJobList newp tl
 
     
 --------------------------------------------------
