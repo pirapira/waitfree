@@ -119,8 +119,14 @@ type JobChannel = Ch.Chan (Maybe (IO ()))
 -- Nothing means this is the end
 
 worker :: JobChannel -> MV.MVar () -> IO ()
-worker = undefined
-
+worker ch fin = do
+  next <- Ch.readChan ch
+  case next of
+    Nothing ->
+        MV.putMVar fin ()
+    Just action -> do
+        action
+        worker ch fin
 
 -- ThreadPool is finite map
 type ThreadPool =
@@ -148,11 +154,27 @@ waitThread = undefined
     
 -- execution
 spawnJobList :: ThreadPool -> [L ()] -> IO ThreadPool
-spawnJobList p [] = return p
-spawnJobList p (L (aid, action) : tl) = do
-  newp <- addJob p aid action
-  spawnJobList newp tl
+spawnJobList p lst = do
+  p' <- addJobList p lst
+  terminateJobList p' -- add Nothing to each one.
 
+addJobList :: ThreadPool -> [L ()] -> IO ThreadPool
+addJobList p [] = return p
+addJobList p (L (aid, action) : tl) = do
+  newp <- addJob p aid action
+  addJobList newp tl
+
+mapIO :: (a -> IO b) -> Map.Map k a -> IO (Map.Map k b)
+mapIO = undefined
+
+terminateJobList :: ThreadPool -> IO ThreadPool
+terminateJobList p = mapIO terminateJobChannelOfThread p
+    
+
+terminateJobChannelOfThread ::
+    (ThreadId, JobChannel, MV.MVar ()) ->
+    IO (ThreadId, JobChannel, MV.MVar ())
+terminateJobChannelOfThread = undefined        
     
 --------------------------------------------------
 -- example simple
