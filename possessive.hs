@@ -1,6 +1,6 @@
-module Possessive where
 
-import Control.Concurrent (ThreadId, forkIO)
+
+import Control.Concurrent (ThreadId, forkIO, killThread)
 import qualified Control.Concurrent.MVar as MV
 import qualified Data.Map as Map
 
@@ -16,10 +16,10 @@ class Thread t where
 
 instance Thread ZeroT where
     t = ZeroT
-    atid _ = 0
+    atid ZeroT = 0
 instance Thread t => Thread (SucT t) where
     t = SucT t
-    atid = succ . atid
+    atid (SucT x) = succ $ atid x
 
 -- how to hide this implementation?
 -- K (writing_destination writing_action)
@@ -133,7 +133,7 @@ spawnPool :: [L ()] -> IO ThreadPool
 spawnPool = run . constructJobPool
 
 run :: JobPool -> IO ThreadPool
-run = Map.foldrWithKey threadSpawn (return Map.empty)
+run = Map.foldrWithKey threadSpawn $ return Map.empty
 
 threadSpawn :: AbstractThreadId -> JobChannel -> IO ThreadPool -> IO ThreadPool
 threadSpawn aid ch p = do
@@ -150,9 +150,13 @@ constructJobPool (L (aid, action) : tl) =
        rest = constructJobPool tl
 
 waitThread :: ThreadPool -> IO ()
-waitThread = undefined
-             
-          
+waitThread = Map.fold threadWait $ return ()
+
+threadWait :: (ThreadId, MV.MVar ()) -> IO () -> IO ()
+threadWait (thid, fin) _ = do
+    MV.readMVar fin
+    killThread thid
+    return ()
     
 --------------------------------------------------
 -- example simple
@@ -162,16 +166,19 @@ waitThread = undefined
 -- and they are done.
 
 l :: K (SucT ZeroT) ()
-l = spawn .>> putStrLn "left"
+l = spawn .>> putStrLn "on"
 
 m :: K ZeroT ()
-m = spawn .>> putStrLn "main"
+m = spawn .>> putStrLn "zero"
 
 -- xxx joblist should contain no parenthesis
 
 joblist :: [L ()]
 joblist = l // (m // [])
 
+
+main :: IO ()
+main = execute joblist
     
 -- example waitfree
 
