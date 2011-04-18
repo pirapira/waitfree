@@ -126,15 +126,21 @@ type ThreadPool =
 type JobPool = 
     Map.Map AbstractThreadId JobChannel
 
-waitThread :: ThreadPool -> IO ()
-waitThread = undefined
+execute :: [L ()] -> IO ()
+execute = spawnPool >=> waitThread
 
-run :: JobPool -> IO ThreadPool
-run = undefined
-             
--- execution
 spawnPool :: [L ()] -> IO ThreadPool
 spawnPool = run . constructJobPool
+
+run :: JobPool -> IO ThreadPool
+run = Map.foldrWithKey threadSpawn (return Map.empty)
+
+threadSpawn :: AbstractThreadId -> JobChannel -> IO ThreadPool -> IO ThreadPool
+threadSpawn aid ch p = do
+    p' <- p
+    fin <- MV.newEmptyMVar
+    thid <- forkIO $ worker ch fin
+    return $ Map.insert aid (thid, fin) p'
 
 constructJobPool :: [L ()] -> JobPool
 constructJobPool [] = Map.empty
@@ -142,6 +148,10 @@ constructJobPool (L (aid, action) : tl) =
   Map.insertWith (++) aid [action] rest
      where
        rest = constructJobPool tl
+
+waitThread :: ThreadPool -> IO ()
+waitThread = undefined
+             
           
     
 --------------------------------------------------
