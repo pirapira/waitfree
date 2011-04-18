@@ -71,10 +71,6 @@ instance Thread t => IOComonad (K t) where
 -- (=>>) :: IOComonad w => w a -> (w a -> IO b) -> IO (w b)
 
     
--- instance F.Representable (K t) where
-    
-
-
 -- -- which remote to take?  Experiment!
 
 remote :: Thread t => (a -> IO b) -> K t a -> K t b
@@ -124,15 +120,11 @@ worker (hd : tl) fin = do
   worker tl fin
 
 -- ThreadPool is finite map
-type JobPool = 
-    Map.Map AbstractThreadId JobChannel
-
 type ThreadPool =
     Map.Map AbstractThreadId (ThreadId, MV.MVar ())
 
-addJob :: JobPool -> AbstractThreadId -> IO () -> JobPool
-addJob p aid action =
-    Map.insertWith (++) aid [action] p
+type JobPool = 
+    Map.Map AbstractThreadId JobChannel
 
 waitThread :: ThreadPool -> IO ()
 waitThread = undefined
@@ -147,9 +139,10 @@ spawnPool = run . constructJobPool
 constructJobPool :: [L ()] -> JobPool
 constructJobPool [] = Map.empty
 constructJobPool (L (aid, action) : tl) =
-  addJob rest aid action
-    where rest = constructJobPool tl
-
+  Map.insertWith (++) aid [action] rest
+     where
+       rest = constructJobPool tl
+          
     
 --------------------------------------------------
 -- example simple
