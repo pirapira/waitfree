@@ -137,8 +137,10 @@ addJob p aid action =
             finishFlag <- MV.newEmptyMVar
             thid <- forkIO $ worker jobChannel finishFlag
             return $ Map.insert aid (thid, jobChannel, finishFlag) p
-                               
-        
+      Just (_, jobChannel, _) ->
+          do
+            Ch.writeChan jobChannel $ Just action
+            return p
 
 waitThread :: ThreadPool -> IO ()
 waitThread = undefined
