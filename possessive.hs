@@ -1,4 +1,4 @@
-
+{-# LANGUAGE TypeOperators, MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances, UndecidableInstances #-}
 
 import Control.Concurrent (ThreadId, forkIO, killThread)
 import qualified Control.Concurrent.MVar as MV
@@ -26,6 +26,51 @@ instance Thread t => Thread (SucT t) where
 -- how to hide this implementation?
 -- K (writing_action)
 -- (destination should be a premise)
+-- hypersequent as heterogeneous list
+
+data HNil = HNil
+data HCons e l = HCons e l
+
+infixr 5 :*:
+infixr 5 .*.
+
+type e :*: l = HCons e l
+e .*. l      = HCons e l
+
+class HyperSequent l
+instance HyperSequent HNil
+instance HyperSequent l => HyperSequent (HCons e l)
+
+-- we need HAppend for describing comm
+class HAppend l l' l'' | l l' -> l''
+ where hAppend :: l -> l' -> l''
+
+instance HyperSequent l => HAppend HNil l l
+ where hAppend HNil = id
+
+instance (HyperSequent l, HAppend l l' l'')
+    => HAppend (HCons x l) l' (HCons x l'')
+ where hAppend (HCons x l) = HCons x. hAppend l
+
+type WithL a = ([L], a)
+-- first in [L] -> first in the queue
+-- the above effect -> should be first in the queue -> earlier in [L]
+
+writeMVar :: MV.MVar a -> a -> IO ()
+writeMVar box v = do
+    MV.tryPutMVar box v
+    return ()
+                             
+comm :: Thread t => Thread s => HAppend l l' l'' => MV.MVar a -> MV.MVar c ->
+        WithL ((K t a) :*: l) -> WithL ((K s c) :*: l') -> WithL ((K t c) :*: (K s a) :*: l'')
+comm abox cbox (s0, HCons (K (taT, ta)) l) (s1, HCons (K (scT, sc)) l') = (news, K (t, tc) .*. K (t, sa) .*. hAppend l l')
+ where
+   tc = MV.takeMVar cbox
+   sa = MV.takeMVar abox
+   news = s0 ++ s1 ++ [ta'] ++ [sc']
+   ta' = (atid taT, ta >>= writeMVar abox)     
+   sc' = (atid scT, sc >>= writeMVar cbox)     
+
 data K t a = K (t, IO a)
 
 spawn :: Thread t => K t ()
@@ -95,10 +140,10 @@ ret :: Thread t => IO a -> K t a
 ret y = K (t, y)
 
 -- internal representation of a job
-newtype L = L (AbstractThreadId, IO ())
+type L = (AbstractThreadId, IO ())
 
 ktol :: Thread t => K t () -> L
-ktol (K (th, f)) = L (atid th, f)
+ktol (K (th, f)) = (atid th, f)
 
 infixr 5 //
 
@@ -115,8 +160,6 @@ infixr 5 //
 -- these are internal
 
 type JobChannel = [IO ()]
--- Just x is a next job
--- Nothing means this is the end
 
 worker :: JobChannel -> MV.MVar () -> IO ()
 worker [] fin = MV.putMVar fin ()
@@ -149,7 +192,7 @@ threadSpawn aid ch p = do
 
 constructJobPool :: [L] -> JobPool
 constructJobPool [] = Map.empty
-constructJobPool (L (aid, action) : tl) =
+constructJobPool ((aid, action) : tl) =
   Map.insertWith (++) aid [action] rest
      where
        rest = constructJobPool tl
