@@ -3,8 +3,6 @@
 import Control.Concurrent (ThreadId, forkIO, killThread)
 import Control.Concurrent.MVar (MVar, tryPutMVar, putMVar, readMVar, newEmptyMVar, tryTakeMVar)
 import qualified Data.Map as Map
-import GHC.IO.Handle (hFlush)
-import System.IO (stdout)
 
 data ZeroT = ZeroT
 data SucT t = SucT t
@@ -40,6 +38,7 @@ infixr 5 :*:
 infixr 5 .*.
 
 type e :*: l = HCons e l
+(.*.) :: e -> l -> HCons e l
 e .*. l      = HCons e l
 
 class HyperSequent l
@@ -83,14 +82,18 @@ comm abox cbox (s0, HCons (K (taT, ta)) l) (s1, HCons (K (scT, sc)) l') =
             case (ta', tc') of
               (Nothing, _) -> return Nothing
               (_, Nothing) -> return Nothing
-              (Just ta_, Just tc_) -> return $ Just (ta_, tc_)
+              (Just ta_, Just tc_) -> do
+                              putStrLn "tatc!"
+                              return $ Just (ta_, tc_)
           scsa = do
             sc' <- sc
             sa' <- sa
             case (sc', sa') of
               (Nothing, _) -> return Nothing
               (_, Nothing) -> return Nothing
-              (Just sc_, Just sa_) -> return $ Just (sc_, sa_)
+              (Just sc_, Just sa_) -> do
+                              putStrLn "scsa!"
+                              return $ Just (sc_, sa_)
           tc = tryTakeMVar cbox
           sa = tryTakeMVar abox
           news = s0 ++ s1 ++ [ta_task] ++ [sc_task]
@@ -103,13 +106,14 @@ merge box (s, (HCons x (HCons y l))) = (news, (HCons reader l))
     news = s ++ [(-1, xwriter)] ++ [(-1, ywriter)]
     xwriter = x >>= writeMVar box
     ywriter = y >>= writeMVar box
-    reader = tryTakeMVar box
+    reader = do
+      putStrLn "merged_reader"
+      val <- tryTakeMVar box
+      putStrLn "merged_reader got value"
+      return val
 
 data K t a = K (t, IO (Maybe a))
 
-spawn :: Thread t => K t ()
-spawn = K (t, return $ Just ())
-    
 class IOMaybeFunctor w where
   wmap :: (a -> IO (Maybe b)) -> w a -> w b
 
@@ -140,7 +144,7 @@ class IOMaybeFunctor w => MVComonad w where
    duplicate = extend (return . Just)
 
 mute :: Thread t => K t a -> L
-mute (K (t, a)) = (atid t, a >>= \_ -> return ()) 
+mute (K (th, a)) = (atid th, a >>= \_ -> return ()) 
 
 mute' :: IO (Maybe ()) -> L
 mute' e = (-1, e >>= \_ -> return ())
@@ -148,12 +152,12 @@ mute' e = (-1, e >>= \_ -> return ())
 -- xxx add law for IOComonad
 
 -- | 'extend' with the arguments swapped. Dual to '>>=' for monads.
-(=>>) :: MVComonad w => w a -> (w a -> IO (Maybe b)) -> w b
-(=>>) = flip extend
+-- (=>>) :: MVComonad w => w a -> (w a -> IO (Maybe b)) -> w b
+-- (=>>) = flip extend
 
 -- | Injects a value into the comonad.
-(.>>) :: MVComonad w => w a -> IO (Maybe b) -> w b
-w .>> b = extend (\_ -> b) w
+-- (.>>) :: MVComonad w => w a -> IO (Maybe b) -> w b
+-- w .>> b = extend (\_ -> b) w
 
 instance Thread t => MVComonad (K t) where
     extract box (K (c, f)) = (newProducer, receiver)
@@ -176,8 +180,8 @@ instance Thread t => MVComonad (K t) where
 
 -- -- which remote to take?  Experiment!
 
-remote :: Thread t => (a -> IO (Maybe b)) -> K t a -> K t b
-remote = wmap
+-- remote :: Thread t => (a -> IO (Maybe b)) -> K t a -> K t b
+-- remote = wmap
 
 ret :: Thread t => IO (Maybe a) -> K t a
 ret y = K (t, y)
@@ -193,31 +197,37 @@ type L = (AbstractThreadId, IO ())
 ---
 --- Example
 ---
-rline :: IO (Maybe String)
-rline = do
-  l <- getLine
-  return $ Just l
+rline ::WithL ((K ZeroT String) :*: HNil)
+rline = ([], (ret r) .*. HNil)
+ where
+   r = do
+     putStrLn $ "Thread 0 reading: "
+     l <- return "one"
+     return $ Just l
 
-rlineZero :: WithL ((K ZeroT String) :*: HNil)
-rlineZero = ([], ret rline .*. HNil)
+rline' ::WithL ((K (SucT ZeroT) String) :*: HNil)
+rline' = ([], (ret r) .*. HNil)
+ where
+   r = do
+     putStrLn $ "Thread 1 reading: "
+     l <- return "two"
+     return $ Just l
 
-rlineSucZero :: WithL ((K (SucT ZeroT) String) :*: HNil)
-rlineSucZero = ([], ret rline .*. HNil)
 
 commF :: MVar String
       -> MVar String
       -> WithL
          (K ZeroT (String, String)
                 :*: (K (SucT ZeroT) (String, String) :*: HNil))
-commF b0 b1 = comm b0 b1 rlineZero rlineSucZero
+commF b0 b1 = comm b0 b1 rline rline'
 
 printTwo :: Thread t => K t (String, String) -> IO (Maybe ())
-printTwo (K (t, s0s1)) = do
+printTwo (K (th, s0s1)) = do
   s0s1' <- s0s1
   case s0s1' of
     Nothing -> return Nothing
     Just (s0, s1) -> do
-        putStrLn $ "Thread " ++ (show $ atid t) ++ " got: " ++ s0 ++ ", " ++ s1
+        putStrLn $ "Thread " ++ (show $ atid th) ++ " got: " ++ s0 ++ ", " ++ s1
         return $ Just ()
 
 eitherPrint ::  WithL
@@ -326,12 +336,6 @@ threadWait (thid, fin) w = do
     
 --------------------------------------------------
 -- example embarrasingly parallel
-
-le :: K (SucT ZeroT) ()
-le = spawn .>> (putStrLn "one" >>= \_ -> return $ Just ())
-
-me :: K ZeroT ()
-me = spawn .>> (putStrLn "zero" >>= \_ -> return $ Just ())
 
 main :: IO ()
 main = do
