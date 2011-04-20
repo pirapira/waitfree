@@ -10,7 +10,7 @@ data ZeroT = ZeroT
 data SucT t = SucT t
 
 -- xxx internal data for thread id's -- hidden
-type AbstractThreadId = Integer
+type AbstractThreadId = Int
 
 class Thread t where
     t :: t
@@ -72,6 +72,14 @@ comm abox cbox (s0, HCons (K (taT, ta)) l) (s1, HCons (K (scT, sc)) l') =
           news = s0 ++ s1 ++ [ta'] ++ [sc']
           ta' = (atid taT, ta >>= writeMVar abox)     
           sc' = (atid scT, sc >>= writeMVar cbox)     
+
+merge :: MV.MVar a -> WithL (IO (Maybe a) :*: IO (Maybe a) :*: l) -> WithL (IO (Maybe a) :*: l)
+merge box (s, (HCons x (HCons y l))) = (news, (HCons reader l))
+  where
+    news = s ++ [(-1, xwriter)] ++ [(-1, ywriter)]
+    xwriter = x >>= writeMVar box
+    ywriter = y >>= writeMVar box
+    reader = MV.tryTakeMVar box
 
 data K t a = K (t, IO (Maybe a))
 
