@@ -26,7 +26,7 @@ instance Thread t => Thread (SucT t) where
 -- how to hide this implementation?
 -- K (writing_action)
 -- (destination should be a premise)
-newtype K t a = K (t, IO a)
+data K t a = K (t, IO a)
 
 spawn :: Thread t => K t ()
 spawn = K (t, return ())
