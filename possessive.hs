@@ -198,6 +198,35 @@ rline = do
 rlineZero :: WithL ((K ZeroT String) :*: HNil)
 rlineZero = ([], ret rline .*. HNil)
 
+rlineSucZero :: WithL ((K (SucT ZeroT) String) :*: HNil)
+rlineSucZero = ([], ret rline .*. HNil)
+
+commF :: MV.MVar String
+      -> MV.MVar String
+      -> WithL
+         (K ZeroT (String, String)
+                :*: (K (SucT ZeroT) (String, String) :*: HNil))
+commF b0 b1 = comm b0 b1 rlineZero rlineSucZero
+
+printTwo :: Thread t => K t (String, String) -> IO (Maybe ())
+printTwo (K (t, s0s1)) = do
+  s0s1' <- s0s1
+  case s0s1' of
+    Nothing -> return Nothing
+    Just (s0, s1) -> do
+        putStrLn $ "Thread " ++ (show $ atid t) ++ " got: " ++ s0 ++ ", " ++ s1
+        return $ Just ()
+
+eitherPrint ::  WithL
+                (K ZeroT (String, String)
+                :*: (K (SucT ZeroT) (String, String) :*: HNil)) ->
+                WithL
+                (K ZeroT () :*: (K (SucT ZeroT) () :*: HNil))
+eitherPrint (s, HCons e0 (HCons e1 l)) = (s, HCons e0' (HCons e1' l))
+    where
+      e0' = extend printTwo e0
+      e1' = extend printTwo e1
+
 -- these are internal
 
 type JobChannel = [IO ()]
