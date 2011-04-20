@@ -56,48 +56,56 @@ type WithL a = ([L], a)
 -- first in [L] -> first in the queue
 -- the above effect -> should be first in the queue -> earlier in [L]
 
-writeMVar :: MV.MVar a -> a -> IO ()
-writeMVar box v = do
+writeMVar :: MV.MVar a -> Maybe a -> IO ()
+writeMVar box (Just v) = do
     MV.tryPutMVar box v
     return ()
+writeMVar _ Nothing = return ()
                              
 comm :: Thread t => Thread s => HAppend l l' l'' => MV.MVar a -> MV.MVar c ->
         WithL ((K t a) :*: l) -> WithL ((K s c) :*: l') -> WithL ((K t c) :*: (K s a) :*: l'')
-comm abox cbox (s0, HCons (K (taT, ta)) l) (s1, HCons (K (scT, sc)) l') = (news, K (t, tc) .*. K (t, sa) .*. hAppend l l')
- where
-   tc = MV.takeMVar cbox
-   sa = MV.takeMVar abox
-   news = s0 ++ s1 ++ [ta'] ++ [sc']
-   ta' = (atid taT, ta >>= writeMVar abox)     
-   sc' = (atid scT, sc >>= writeMVar cbox)     
+comm abox cbox (s0, HCons (K (taT, ta)) l) (s1, HCons (K (scT, sc)) l') =
+    (news, K (t, tc) .*. K (t, sa) .*. hAppend l l')
+        where
+          tc = MV.tryTakeMVar cbox
+          sa = MV.tryTakeMVar abox
+          news = s0 ++ s1 ++ [ta'] ++ [sc']
+          ta' = (atid taT, ta >>= writeMVar abox)     
+          sc' = (atid scT, sc >>= writeMVar cbox)     
 
-data K t a = K (t, IO a)
+data K t a = K (t, IO (Maybe a))
 
 spawn :: Thread t => K t ()
-spawn = K (t, return ())
+spawn = K (t, return $ Just ())
     
-class IOFunctor w where
-  wmap :: (a -> IO b) -> w a -> w b
+class IOMaybeFunctor w where
+  wmap :: (a -> IO (Maybe b)) -> w a -> w b
 
-instance Thread t => IOFunctor (K t) where
+-- xxx I need IO (Maybe a) composition
+
+instance Thread t => IOMaybeFunctor (K t) where
   wmap f (K (_, x)) = K (t, y)
     where
-      y = x >>= f
+      y = do
+        x' <- x
+        case x' of
+          Nothing -> return Nothing
+          Just x'' -> f x''
 
 (>=>)       :: Monad m => (a -> m b) -> (b -> m c) -> (a -> m c)
 f >=> g     = \x -> f x >>= g
 
           
 -- IOComonad. to be moved 
-class IOFunctor w => MVComonad w where
+class IOMaybeFunctor w => MVComonad w where
    -- extract sharedBox producer = (newProducer, receiver)
-   extract :: MV.MVar a -> w a -> (w a, IO a)
+   extract :: MV.MVar a -> w a -> (w a, IO (Maybe a))
    duplicate :: w a -> w (w a)
-   extend :: (w a -> IO b) -> w a -> w b
+   extend :: (w a -> IO (Maybe b)) -> w a -> w b
 
    extend f = g . duplicate
        where g = wmap f
-   duplicate = extend return
+   duplicate = extend (return . Just)
 
 mute :: K t a -> IO ()
 mute _ = return ()
@@ -105,11 +113,11 @@ mute _ = return ()
 -- xxx add law for IOComonad
 
 -- | 'extend' with the arguments swapped. Dual to '>>=' for monads.
-(=>>) :: MVComonad w => w a -> (w a -> IO b) -> w b
+(=>>) :: MVComonad w => w a -> (w a -> IO (Maybe b)) -> w b
 (=>>) = flip extend
 
 -- | Injects a value into the comonad.
-(.>>) :: MVComonad w => w a -> IO b -> w b
+(.>>) :: MVComonad w => w a -> IO (Maybe b) -> w b
 w .>> b = extend (\_ -> b) w
 
 instance Thread t => MVComonad (K t) where
@@ -118,11 +126,11 @@ instance Thread t => MVComonad (K t) where
         newProducer = K (c, f')
         f' = do
           x <- f
-          MV.putMVar box x
+          writeMVar box x
           return x
         receiver = do 
           putStrLn "waiting_for_remote_value"
-          val <- MV.readMVar box
+          val <- MV.tryTakeMVar box
           putStrLn "got value"
           return val
     extend trans r@(K (_, f)) = K (t, g)
@@ -133,22 +141,14 @@ instance Thread t => MVComonad (K t) where
 
 -- -- which remote to take?  Experiment!
 
-remote :: Thread t => (a -> IO b) -> K t a -> K t b
+remote :: Thread t => (a -> IO (Maybe b)) -> K t a -> K t b
 remote = wmap
 
-ret :: Thread t => IO a -> K t a
+ret :: Thread t => IO (Maybe a) -> K t a
 ret y = K (t, y)
 
 -- internal representation of a job
 type L = (AbstractThreadId, IO ())
-
-ktol :: Thread t => K t () -> L
-ktol (K (th, f)) = (atid th, f)
-
-infixr 5 //
-
-(//) :: Thread t => K t () -> [L] -> [L]
-(//) hd tl = (ktol hd) : tl
 
 
 -- the waitfree communication
@@ -210,49 +210,13 @@ threadWait (thid, fin) w = do
 -- example embarrasingly parallel
 
 l :: K (SucT ZeroT) ()
-l = spawn .>> putStrLn "one"
+l = spawn .>> (putStrLn "one" >>= \_ -> return $ Just ())
 
 m :: K ZeroT ()
-m = spawn .>> putStrLn "zero"
-
-embarassingly_parallel = l // m // []    
-
-
---------------------------------------------------
--- example ping_pong
-
-writer :: K ZeroT String
-writer = ret $ do
-           putStrLn $ "writer start"
-           hFlush stdout
-           str <- getLine
-           putStrLn $ "writer got: " ++ str
-           return str
-
-writer' :: MV.MVar String -> K ZeroT ()
-writer' box = extend mute $ new_writer box
-
-new_writer :: MV.MVar String -> K ZeroT String
-new_writer box = fst $ reader_writer box
-         
-reader_writer :: MV.MVar String -> (K ZeroT String, K (SucT ZeroT) ())
-reader_writer box = (w,  reader)
-  where
-    (w, str) = extract box writer
-    reader = K (t, readeraction)
-    readeraction = do
-      putStrLn "reader start"
-      str' <- str
-      putStrLn $ "reader got: " ++ str'
-
-rw :: MV.MVar String -> [L]           
-rw box = reader // writer' box // []
-    where reader = snd $ reader_writer box
+m = spawn .>> (putStrLn "zero" >>= \_ -> return $ Just ())
 
 main :: IO ()
-main = do
-    box <- MV.newEmptyMVar
-    execute $ rw box
+main = undefined
     
 -- example waitfree
 
