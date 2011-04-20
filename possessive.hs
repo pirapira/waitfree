@@ -28,6 +28,11 @@ instance Thread t => Thread (SucT t) where
 -- (destination should be a premise)
 -- hypersequent as heterogeneous list
 
+
+---
+--- Hypersequent
+--- 
+
 data HNil = HNil
 data HCons e l = HCons e l
 
@@ -51,6 +56,11 @@ instance HyperSequent l => HAppend HNil l l
 instance (HyperSequent l, HAppend l l' l'')
     => HAppend (HCons x l) l' (HCons x l'')
  where hAppend (HCons x l) = HCons x. hAppend l
+
+
+---
+--- Hypersequent with box list and computation list
+--- 
 
 type WithL a = ([L], a)
 -- first in [L] -> first in the queue
