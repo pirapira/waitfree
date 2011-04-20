@@ -73,15 +73,29 @@ writeMVar box (Just v) = do
 writeMVar _ Nothing = return ()
                              
 comm :: Thread t => Thread s => HAppend l l' l'' => MV.MVar a -> MV.MVar c ->
-        WithL ((K t a) :*: l) -> WithL ((K s c) :*: l') -> WithL ((K t c) :*: (K s a) :*: l'')
+        WithL ((K t a) :*: l) -> WithL ((K s c) :*: l') -> WithL ((K t (a,c)) :*: (K s (c,a)) :*: l'')
 comm abox cbox (s0, HCons (K (taT, ta)) l) (s1, HCons (K (scT, sc)) l') =
-    (news, K (t, tc) .*. K (t, sa) .*. hAppend l l')
+    (news, K (taT, tatc) .*. K (scT, scsa) .*. hAppend l l')
         where
+          tatc = do
+            tc' <- tc
+            ta' <- ta
+            case (ta', tc') of
+              (Nothing, _) -> return Nothing
+              (_, Nothing) -> return Nothing
+              (Just ta_, Just tc_) -> return $ Just (ta_, tc_)
+          scsa = do
+            sc' <- sc
+            sa' <- sa
+            case (sc', sa') of
+              (Nothing, _) -> return Nothing
+              (_, Nothing) -> return Nothing
+              (Just sc_, Just sa_) -> return $ Just (sc_, sa_)
           tc = MV.tryTakeMVar cbox
           sa = MV.tryTakeMVar abox
-          news = s0 ++ s1 ++ [ta'] ++ [sc']
-          ta' = (atid taT, ta >>= writeMVar abox)     
-          sc' = (atid scT, sc >>= writeMVar cbox)     
+          news = s0 ++ s1 ++ [ta_task] ++ [sc_task]
+          ta_task = (atid taT, ta >>= writeMVar abox)     
+          sc_task = (atid scT, sc >>= writeMVar cbox)     
 
 merge :: MV.MVar a -> WithL (IO (Maybe a) :*: IO (Maybe a) :*: l) -> WithL (IO (Maybe a) :*: l)
 merge box (s, (HCons x (HCons y l))) = (news, (HCons reader l))
@@ -173,7 +187,16 @@ type L = (AbstractThreadId, IO ())
 -- waitfree :: K t a -> K s b -> Eigher (K t b) (K s a)
 -- waitfree = ?
 
+---
+--- Example
+---
+rline :: IO (Maybe String)
+rline = do
+  l <- getLine
+  return $ Just l
 
+rlineZero :: WithL ((K ZeroT String) :*: HNil)
+rlineZero = ([], ret rline .*. HNil)
 
 -- these are internal
 
@@ -227,11 +250,11 @@ threadWait (thid, fin) w = do
 --------------------------------------------------
 -- example embarrasingly parallel
 
-l :: K (SucT ZeroT) ()
-l = spawn .>> (putStrLn "one" >>= \_ -> return $ Just ())
+le :: K (SucT ZeroT) ()
+le = spawn .>> (putStrLn "one" >>= \_ -> return $ Just ())
 
-m :: K ZeroT ()
-m = spawn .>> (putStrLn "zero" >>= \_ -> return $ Just ())
+me :: K ZeroT ()
+me = spawn .>> (putStrLn "zero" >>= \_ -> return $ Just ())
 
 main :: IO ()
 main = undefined
