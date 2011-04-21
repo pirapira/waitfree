@@ -67,38 +67,46 @@ type WithL a = ([L], a)
 
 writeMVar :: MVar a -> Maybe a -> IO ()
 writeMVar box (Just v) = do
-    tryPutMVar box v
+    _ <- tryPutMVar box v
     return ()
 writeMVar _ Nothing = return ()
-                             
-comm :: Thread t => Thread s => HAppend l l' l'' => MVar a -> MVar c ->
-        WithL ((K t a) :*: l) -> WithL ((K s c) :*: l') -> WithL ((K t (a,c)) :*: (K s (c,a)) :*: l'')
+             
+-- I guess the six thing come from this.   Maybe explicit weakening helps.
+                
+comm :: Show a => Show c => Thread t => Thread s => HAppend l l' l'' => MVar a -> MVar c ->
+        WithL ((K t a) :*: l) -> WithL ((K s c) :*: l') -> WithL ((K t c) :*: (K s a) :*: l'')
 comm abox cbox (s0, HCons (K (taT, ta)) l) (s1, HCons (K (scT, sc)) l') =
-    (news, K (taT, tatc) .*. K (scT, scsa) .*. hAppend l l')
+    (news, K (taT, tc) .*. K (scT, sa) .*. hAppend l l')
         where
-          tatc = do
-            tc' <- tc
-            ta' <- ta
-            case (ta', tc') of
-              (Nothing, _) -> return Nothing
-              (_, Nothing) -> return Nothing
-              (Just ta_, Just tc_) -> do
-                              putStrLn "tatc!"
-                              return $ Just (ta_, tc_)
-          scsa = do
-            sc' <- sc
-            sa' <- sa
-            case (sc', sa') of
-              (Nothing, _) -> return Nothing
-              (_, Nothing) -> return Nothing
-              (Just sc_, Just sa_) -> do
-                              putStrLn "scsa!"
-                              return $ Just (sc_, sa_)
-          tc = tryTakeMVar cbox
-          sa = tryTakeMVar abox
+          tc = do
+            putStrLn "TC taking"
+            val <- tryTakeMVar cbox
+            case val of
+              Nothing -> putStrLn "TC fail"
+              Just _ -> putStrLn "TC success"
+            return val
+          sa = do
+            putStrLn "SA taking"
+            val <- tryTakeMVar abox
+            case val of
+              Nothing -> putStrLn "SA fail"
+              Just _ -> putStrLn "SA success"
+            return val
           news = s0 ++ s1 ++ [ta_task] ++ [sc_task]
-          ta_task = (atid taT, ta >>= writeMVar abox)     
-          sc_task = (atid scT, sc >>= writeMVar cbox)     
+          ta_task = (atid taT,
+                          do
+                            ta' <- ta
+                            putStrLn $ "Thread " ++ (show $ atid taT) ++ "writing" ++ (show ta')
+                            writeMVar abox ta'
+                            putStrLn $ "Thread " ++ (show $ atid taT) ++ "written" ++ (show ta')
+                    )     
+          sc_task = (atid scT,
+                          do
+                            sc' <- sc
+                            putStrLn $ "Thread " ++ (show $ atid scT) ++ "writing" ++ (show sc')
+                            writeMVar cbox sc'
+                            putStrLn $ "Thread " ++ (show $ atid scT) ++ "written" ++ (show sc')
+                    ) 
 
 merge :: MVar a -> WithL (IO (Maybe a) :*: IO (Maybe a) :*: l) -> WithL (IO (Maybe a) :*: l)
 merge box (s, (HCons x (HCons y l))) = (news, (HCons reader l))
@@ -172,11 +180,7 @@ instance Thread t => MVComonad (K t) where
           val <- tryTakeMVar box
           putStrLn "got value"
           return val
-    extend trans r@(K (_, f)) = K (t, g)
-      where
-        g = do
-          f
-          trans r
+    extend trans r = K (t, trans r)
 
 -- -- which remote to take?  Experiment!
 
@@ -202,7 +206,7 @@ rline = ([], (ret r) .*. HNil)
  where
    r = do
      putStrLn $ "Thread 0 reading: "
-     l <- return "one"
+     l <- getLine
      return $ Just l
 
 rline' ::WithL ((K (SucT ZeroT) String) :*: HNil)
@@ -210,35 +214,37 @@ rline' = ([], (ret r) .*. HNil)
  where
    r = do
      putStrLn $ "Thread 1 reading: "
-     l <- return "two"
+     l <- getLine
      return $ Just l
 
 
 commF :: MVar String
       -> MVar String
       -> WithL
-         (K ZeroT (String, String)
-                :*: (K (SucT ZeroT) (String, String) :*: HNil))
+         (K ZeroT String
+                :*: (K (SucT ZeroT) String :*: HNil))
 commF b0 b1 = comm b0 b1 rline rline'
 
-printTwo :: Thread t => K t (String, String) -> IO (Maybe ())
-printTwo (K (th, s0s1)) = do
-  s0s1' <- s0s1
-  case s0s1' of
-    Nothing -> return Nothing
-    Just (s0, s1) -> do
-        putStrLn $ "Thread " ++ (show $ atid th) ++ " got: " ++ s0 ++ ", " ++ s1
+printOne :: Thread t => K t String -> IO (Maybe ())
+printOne (K (th, s0s1)) = do
+  s <- s0s1
+  case s of
+    Nothing -> do
+        putStrLn $ "Thread " ++ (show $ atid th) ++ " got nothing"
+        return Nothing
+    Just s_ -> do
+        putStrLn $ "Thread " ++ (show $ atid th) ++ " got: " ++ s_
         return $ Just ()
 
 eitherPrint ::  WithL
-                (K ZeroT (String, String)
-                :*: (K (SucT ZeroT) (String, String) :*: HNil)) ->
+                (K ZeroT String
+                :*: (K (SucT ZeroT) String :*: HNil)) ->
                 WithL
                 (K ZeroT () :*: (K (SucT ZeroT) () :*: HNil))
 eitherPrint (s, HCons e0 (HCons e1 l)) = (s, HCons e0' (HCons e1' l))
     where
-      e0' = extend printTwo e0
-      e1' = extend printTwo e1
+      e0' = extend printOne e0
+      e1' = extend printOne e1
 
 step1 :: MVar String -> MVar String ->
          WithL (K ZeroT () :*: (K (SucT ZeroT) () :*: HNil))
@@ -275,6 +281,7 @@ type JobChannel = [IO ()]
 worker :: JobChannel -> MVar () -> IO ()
 worker [] fin = putMVar fin ()
 worker (hd : tl) fin = do
+  putStrLn "job---"
   hd
   worker tl fin
 
