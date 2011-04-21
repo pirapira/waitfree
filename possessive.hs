@@ -73,9 +73,9 @@ writeMVar _ Nothing = return ()
              
 -- I guess the six thing come from this.   Maybe explicit weakening helps.
                 
-comm :: Show a => Show c => Thread t => Thread s => HAppend l l' l'' => MVar a -> MVar c ->
+comm_ :: Show a => Show c => Thread t => Thread s => HAppend l l' l'' => MVar a -> MVar c ->
         WithL ((K t a) :*: l) -> WithL ((K s c) :*: l') -> WithL ((K t (a, c)) :*: (K s (c, a)) :*: l'')
-comm abox cbox (s0, HCons (K (taT, ta)) l) (s1, HCons (K (scT, sc)) l') =
+comm_ abox cbox (s0, HCons (K (taT, ta)) l) (s1, HCons (K (scT, sc)) l') =
     (news, K (taT, tac) .*. K (scT, sca) .*. hAppend l l')
         where
           tac = do
@@ -197,16 +197,16 @@ type L = (AbstractThreadId, IO ())
 ---
 --- Example
 ---
-rline ::WithL ((K ZeroT String) :*: HNil)
-rline = ([], (ret r) .*. HNil)
+rline :: IO (WithL ((K ZeroT String) :*: HNil))
+rline = return $ ([], (ret r) .*. HNil)
  where
    r = do
      putStrLn $ "Thread 0 reading: "
      l <- getLine
      return $ Just l
 
-rline' ::WithL ((K (SucT ZeroT) String) :*: HNil)
-rline' = ([], (ret r) .*. HNil)
+rline' :: IO (WithL ((K (SucT ZeroT) String) :*: HNil))
+rline' = return $ ([], (ret r) .*. HNil)
  where
    r = do
      putStrLn $ "Thread 1 reading: "
@@ -306,14 +306,22 @@ threadWait (thid, fin) w = do
     killThread thid
     w
 
+comm :: (Thread s, Thread t, HAppend l l' l'', Show c, Show a) =>
+        IO ([L], HCons (K t a) l)
+         -> IO ([L], HCons (K s c) l')
+         -> IO (WithL (K t (a, c) :*: (K s (c, a) :*: l'')))
+comm x y = do
+  (s0, HCons (K (taT, ta)) l) <- x
+  (s1, HCons (K (scT, sc)) l') <- y
+  abox <- newEmptyMVar
+  cbox <- newEmptyMVar
+  return $ comm_ abox cbox (s0, HCons (K (taT, ta)) l) (s1, HCons (K (scT, sc)) l')
+
 cF :: IO
       (WithL
         (K ZeroT (String, String)
            :*: (K (SucT ZeroT) (String, String) :*: HNil)))
-cF = do
-  b0 <- newEmptyMVar
-  b1 <- newEmptyMVar
-  return $ comm b0 b1 rline rline'
+cF = comm rline rline'
 
 katamari1 :: IO (WithL (K ZeroT () :*: (K (SucT ZeroT) () :*: HNil)))
 katamari1 = do
