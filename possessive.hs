@@ -214,13 +214,6 @@ rline' = ([], (ret r) .*. HNil)
      return $ Just l
 
 
-commF :: MVar String
-      -> MVar String
-      -> WithL
-         (K ZeroT (String, String)
-                :*: (K (SucT ZeroT) (String, String) :*: HNil))
-commF b0 b1 = comm b0 b1 rline rline'
-
 printOne :: Thread t => K t (String, String) -> IO (Maybe ())
 printOne (K (th, s0s1)) = do
   s <- s0s1
@@ -241,10 +234,6 @@ eitherPrint (s, HCons e0 (HCons e1 l)) = (s, HCons e0' (HCons e1' l))
     where
       e0' = extend printOne e0
       e1' = extend printOne e1
-
-step1 :: MVar String -> MVar String ->
-         WithL (K ZeroT () :*: (K (SucT ZeroT) () :*: HNil))
-step1 b0 b1 = eitherPrint $ commF b0 b1
 
 trivialize :: MVar () -> MVar () ->
     WithL (K ZeroT () :*: (K (SucT ZeroT) () :*: HNil)) ->
@@ -317,14 +306,27 @@ threadWait (thid, fin) w = do
     killThread thid
     w
 
+cF :: IO
+      (WithL
+        (K ZeroT (String, String)
+           :*: (K (SucT ZeroT) (String, String) :*: HNil)))
+cF = do
+  b0 <- newEmptyMVar
+  b1 <- newEmptyMVar
+  return $ comm b0 b1 rline rline'
+
+katamari1 :: IO (WithL (K ZeroT () :*: (K (SucT ZeroT) () :*: HNil)))
+katamari1 = do
+  c <- cF
+  return $ eitherPrint c
+
 -- move newEmptyMVar inside the parts
 katamari2 :: IO (WithL (IO (Maybe ()) :*: (IO (Maybe ()) :*: HNil)))
 katamari2 = do
-  b0 <- newEmptyMVar
-  b1 <- newEmptyMVar
   b2 <- newEmptyMVar
   b3 <- newEmptyMVar
-  return $ trivialize b2 b3 $ step1 b0 b1
+  k <- katamari1
+  return $ trivialize b2 b3 k
 
 merge :: IO (WithL (IO (Maybe a) :*: (IO (Maybe a) :*: l)))
        -> IO (WithL (IO (Maybe a) :*: l))
