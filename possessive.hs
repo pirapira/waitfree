@@ -1,7 +1,7 @@
 {-# LANGUAGE TypeOperators, MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances, UndecidableInstances #-}
 
 import Control.Concurrent (ThreadId, forkIO, killThread)
-import Control.Concurrent.MVar (MVar, tryPutMVar, putMVar, readMVar, newEmptyMVar, tryTakeMVar)
+import Control.Concurrent.MVar (MVar, tryPutMVar, putMVar, readMVar, newEmptyMVar, tryTakeMVar, takeMVar)
 import qualified Data.Map as Map
 
 data ZeroT = ZeroT
@@ -74,24 +74,32 @@ writeMVar _ Nothing = return ()
 -- I guess the six thing come from this.   Maybe explicit weakening helps.
                 
 comm :: Show a => Show c => Thread t => Thread s => HAppend l l' l'' => MVar a -> MVar c ->
-        WithL ((K t a) :*: l) -> WithL ((K s c) :*: l') -> WithL ((K t c) :*: (K s a) :*: l'')
+        WithL ((K t a) :*: l) -> WithL ((K s c) :*: l') -> WithL ((K t (a, c)) :*: (K s (c, a)) :*: l'')
 comm abox cbox (s0, HCons (K (taT, ta)) l) (s1, HCons (K (scT, sc)) l') =
-    (news, K (taT, tc) .*. K (scT, sa) .*. hAppend l l')
+    (news, K (taT, tac) .*. K (scT, sca) .*. hAppend l l')
         where
-          tc = do
+          tac = do
             putStrLn "TC taking"
-            val <- tryTakeMVar cbox
-            case val of
-              Nothing -> putStrLn "TC fail"
-              Just _ -> putStrLn "TC success"
-            return val
-          sa = do
+            cval <- tryTakeMVar cbox
+            case cval of
+              Nothing -> do
+                        putStrLn "TC fail"
+                        return Nothing
+              Just cva -> do
+                        putStrLn "TC success"
+                        aval <- takeMVar abox -- this should not block
+                        return $ Just (aval, cva)
+          sca = do
             putStrLn "SA taking"
-            val <- tryTakeMVar abox
-            case val of
-              Nothing -> putStrLn "SA fail"
-              Just _ -> putStrLn "SA success"
-            return val
+            aval <- tryTakeMVar abox
+            case aval of
+              Nothing -> do
+                       putStrLn "SA fail"
+                       return Nothing
+              Just ava -> do
+                       putStrLn "SA success"
+                       cval <- takeMVar cbox
+                       return $ Just (cval, ava)
           news = s0 ++ s1 ++ [ta_task] ++ [sc_task]
           ta_task = (atid taT,
                           do
@@ -221,24 +229,24 @@ rline' = ([], (ret r) .*. HNil)
 commF :: MVar String
       -> MVar String
       -> WithL
-         (K ZeroT String
-                :*: (K (SucT ZeroT) String :*: HNil))
+         (K ZeroT (String, String)
+                :*: (K (SucT ZeroT) (String, String) :*: HNil))
 commF b0 b1 = comm b0 b1 rline rline'
 
-printOne :: Thread t => K t String -> IO (Maybe ())
+printOne :: Thread t => K t (String, String) -> IO (Maybe ())
 printOne (K (th, s0s1)) = do
   s <- s0s1
   case s of
     Nothing -> do
         putStrLn $ "Thread " ++ (show $ atid th) ++ " got nothing"
         return Nothing
-    Just s_ -> do
-        putStrLn $ "Thread " ++ (show $ atid th) ++ " got: " ++ s_
+    Just (s0, s1) -> do
+        putStrLn $ "Thread " ++ (show $ atid th) ++ " got: " ++ s0 ++ s1
         return $ Just ()
 
 eitherPrint ::  WithL
-                (K ZeroT String
-                :*: (K (SucT ZeroT) String :*: HNil)) ->
+                (K ZeroT (String, String)
+                :*: (K (SucT ZeroT) (String, String) :*: HNil)) ->
                 WithL
                 (K ZeroT () :*: (K (SucT ZeroT) () :*: HNil))
 eitherPrint (s, HCons e0 (HCons e1 l)) = (s, HCons e0' (HCons e1' l))
