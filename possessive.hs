@@ -349,17 +349,18 @@ threadWait (thid, fin) w = do
     killThread thid
     w
     
---------------------------------------------------
--- example embarrasingly parallel
 
-main :: IO ()
-main = do
+katamari :: IO [L]
+katamari = do
   b0 <- newEmptyMVar
   b1 <- newEmptyMVar
   b2 <- newEmptyMVar
   b3 <- newEmptyMVar
   b4 <- newEmptyMVar
-  execute $ finalL b0 b1 b2 b3 b4
+  return $ finalL b0 b1 b2 b3 b4
+
+main :: IO ()
+main = katamari >>= execute
     
 -- example waitfree
 
