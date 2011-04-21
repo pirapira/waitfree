@@ -307,12 +307,6 @@ hypersequentToL (s, HCons e HNil) = s ++ [lastjob]
    lastjob = mute' e
 
 
-finalL :: MVar String -> MVar String -> MVar ()
-          -> MVar ()
-          -> MVar ()
-          -> [L]
-finalL b0 b1 b2 b3 b4 = hypersequentToL $ final b0 b1 b2 b3 b4 
-
 ---
 --- What to do with [L]
 ---
@@ -349,18 +343,17 @@ threadWait (thid, fin) w = do
     killThread thid
     w
     
-
-katamari :: IO [L]
+katamari :: IO (WithL (IO (Maybe ()) :*: HNil))
 katamari = do
   b0 <- newEmptyMVar
   b1 <- newEmptyMVar
   b2 <- newEmptyMVar
   b3 <- newEmptyMVar
   b4 <- newEmptyMVar
-  return $ finalL b0 b1 b2 b3 b4
+  return $ final b0 b1 b2 b3 b4 
 
 main :: IO ()
-main = katamari >>= execute
+main = fmap hypersequentToL katamari >>= execute
     
 -- example waitfree
 
