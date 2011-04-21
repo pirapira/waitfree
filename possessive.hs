@@ -116,18 +116,6 @@ comm abox cbox (s0, HCons (K (taT, ta)) l) (s1, HCons (K (scT, sc)) l') =
                             putStrLn $ "Thread " ++ (show $ atid scT) ++ "written" ++ (show sc')
                     ) 
 
-merge :: MVar a -> WithL (IO (Maybe a) :*: IO (Maybe a) :*: l) -> WithL (IO (Maybe a) :*: l)
-merge box (s, (HCons x (HCons y l))) = (news, (HCons reader l))
-  where
-    news = s ++ [(-1, xwriter)] ++ [(-1, ywriter)]
-    xwriter = x >>= writeMVar box
-    ywriter = y >>= writeMVar box
-    reader = do
-      putStrLn "merged_reader"
-      val <- tryTakeMVar box
-      putStrLn "merged_reader got value"
-      return val
-
 data K t a = K (t, IO (Maybe a))
 
 class IOMaybeFunctor w where
@@ -268,20 +256,6 @@ trivialize box0 box1 (s, HCons e0 (HCons e1 l)) = (news, HCons e0' (HCons e1' l)
       (k1, e1') = extract box1 e1
 
 
-step2 :: MVar String -> MVar String -> MVar () -> MVar () ->
-             WithL (IO (Maybe ()) :*: IO (Maybe ()) :*: HNil)
-step2 b0 b1 b2 b3 = trivialize b2 b3 $ step1 b0 b1
-
-merged :: MVar () ->
-          WithL (IO (Maybe ()) :*: IO (Maybe ()) :*: HNil) ->
-          WithL (IO (Maybe ()) :*: HNil)
-merged box conf = merge box conf
-
-final :: MVar String -> MVar String -> MVar () -> MVar () -> MVar () ->
-         WithL (IO (Maybe ()) :*: HNil)
-final b0 b1 b2 b3 b4 = merged b4 $ step2 b0 b1 b2 b3
-
-
 -- these are internal
 
 type JobChannel = [IO ()]
@@ -342,15 +316,32 @@ threadWait (thid, fin) w = do
     readMVar fin
     killThread thid
     w
-    
-katamari :: IO (WithL (IO (Maybe ()) :*: HNil))
-katamari = do
+
+-- move newEmptyMVar inside the parts
+katamari2 :: IO (WithL (IO (Maybe ()) :*: (IO (Maybe ()) :*: HNil)))
+katamari2 = do
   b0 <- newEmptyMVar
   b1 <- newEmptyMVar
   b2 <- newEmptyMVar
   b3 <- newEmptyMVar
-  b4 <- newEmptyMVar
-  return $ final b0 b1 b2 b3 b4 
+  return $ trivialize b2 b3 $ step1 b0 b1
+
+merge :: IO (WithL (IO (Maybe a) :*: (IO (Maybe a) :*: l)))
+       -> IO (WithL (IO (Maybe a) :*: l))
+merge above = do
+  box <- newEmptyMVar
+  (s, (HCons x (HCons y l))) <- above
+  return $ (s ++ [(-1, x >>= writeMVar box)] ++ [(-1, y >>= writeMVar box)], (HCons (reader box) l))
+   where
+    reader box = do
+      putStrLn "merged_reader"
+      val <- tryTakeMVar box
+      putStrLn "merged_reader got value"
+      return val
+      
+    
+katamari :: IO (WithL (IO (Maybe ()) :*: HNil))
+katamari = merge katamari2
 
 main :: IO ()
 main = fmap hypersequentToL katamari >>= execute
