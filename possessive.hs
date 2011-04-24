@@ -197,22 +197,28 @@ type L = (AbstractThreadId, IO ())
 ---
 --- Example
 ---
+local :: Thread t => IO a -> IO (WithL ((K t a) :*: HNil))
+local f = return $ ([], (ret f') .*. HNil)
+  where
+    f' = do
+      x <- f
+      return $ Just x
+
+
 rline :: IO (WithL ((K ZeroT String) :*: HNil))
-rline = return $ ([], (ret r) .*. HNil)
+rline = local r
  where
    r = do
-     putStrLn $ "Thread 0 reading: "
-     l <- getLine
-     return $ Just l
+     putStrLn $ "Thread 0 requiring input: "
+     getLine
+
 
 rline' :: IO (WithL ((K (SucT ZeroT) String) :*: HNil))
-rline' = return $ ([], (ret r) .*. HNil)
+rline' = local r
  where
    r = do
-     putStrLn $ "Thread 1 reading: "
-     l <- getLine
-     return $ Just l
-
+     putStrLn $ "Thread 1 requiring input: "
+     getLine
 
 printOne :: Thread t => K t (String, String) -> IO (Maybe ())
 printOne (K (th, s0s1)) = do
