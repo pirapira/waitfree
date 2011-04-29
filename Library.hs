@@ -1,6 +1,6 @@
 {-# LANGUAGE TypeOperators, MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances, UndecidableInstances #-}
 
-module Possessive where
+module Library where
 
 import Control.Concurrent (ThreadId, forkIO, killThread)
 import Control.Concurrent.MVar (MVar, tryPutMVar, putMVar, readMVar, newEmptyMVar, tryTakeMVar, takeMVar)
@@ -8,7 +8,6 @@ import qualified Data.Map as Map
 
 data ZeroT = ZeroT
 data SucT t = SucT t
-
 -- xxx internal data for thread id's -- hidden
 type AbstractThreadId = Int
 
@@ -192,57 +191,6 @@ ret y = K (t, y)
 type L = (AbstractThreadId, IO ())
 
 
--- the waitfree communication
--- waitfree :: K t a -> K s b -> Eigher (K t b) (K s a)
--- waitfree = ?
-
----
---- Example
----
-local :: Thread t => IO a -> IO (WithL ((K t a) :*: HNil))
-local f = return $ ([], (ret f') .*. HNil)
-  where
-    f' = do
-      x <- f
-      return $ Just x
-
-
-rline :: IO (WithL ((K ZeroT String) :*: HNil))
-rline = local r
- where
-   r = do
-     putStrLn $ "Thread 0 requiring input: "
-     getLine
-
-
-rline' :: IO (WithL ((K (SucT ZeroT) String) :*: HNil))
-rline' = local r
- where
-   r = do
-     putStrLn $ "Thread 1 requiring input: "
-     getLine
-
-printOne :: Thread t => K t (String, String) -> IO (Maybe ())
-printOne (K (th, s0s1)) = do
-  s <- s0s1
-  case s of
-    Nothing -> do
-        putStrLn $ "Thread " ++ (show $ atid th) ++ " got nothing"
-        return Nothing
-    Just (s0, s1) -> do
-        putStrLn $ "Thread " ++ (show $ atid th) ++ " got: " ++ s0 ++ s1
-        return $ Just ()
-
-eitherPrint ::  WithL
-                (K ZeroT (String, String)
-                :*: (K (SucT ZeroT) (String, String) :*: HNil)) ->
-                WithL
-                (K ZeroT () :*: (K (SucT ZeroT) () :*: HNil))
-eitherPrint (s, HCons e0 (HCons e1 l)) = (s, HCons e0' (HCons e1' l))
-    where
-      e0' = extend printOne e0
-      e1' = extend printOne e1
-
 trivialize :: MVar () -> MVar () ->
     WithL (K ZeroT () :*: (K (SucT ZeroT) () :*: HNil)) ->
     WithL (IO (Maybe ()) :*: IO (Maybe ()) :*: HNil)
@@ -251,9 +199,6 @@ trivialize box0 box1 (s, HCons e0 (HCons e1 l)) = (news, HCons e0' (HCons e1' l)
       news = s ++ [mute k0] ++ [mute k1]
       (k0, e0') = extract box0 e0
       (k1, e1') = extract box1 e1
-
-
--- these are internal
 
 type JobChannel = [IO ()]
 
@@ -325,20 +270,6 @@ comm x y = do
   cbox <- newEmptyMVar
   return $ comm_ abox cbox (s0, HCons (K (taT, ta)) l) (s1, HCons (K (scT, sc)) l')
 
-cF :: IO
-      (WithL
-        (K ZeroT (String, String)
-           :*: (K (SucT ZeroT) (String, String) :*: HNil)))
-cF = comm rline rline'
-
-katamari2_library :: IO (WithL (K ZeroT () :*: (K (SucT ZeroT) () :*: HNil))) ->
-                     IO (WithL (IO (Maybe ()) :*: (IO (Maybe ()) :*: HNil)))
-katamari2_library katamari1 = do
-  b2 <- newEmptyMVar
-  b3 <- newEmptyMVar
-  k <- katamari1
-  return $ trivialize b2 b3 k
-
 merge :: IO (WithL (IO (Maybe a) :*: (IO (Maybe a) :*: l)))
        -> IO (WithL (IO (Maybe a) :*: l))
 merge above = do
@@ -352,12 +283,12 @@ merge above = do
       putStrLn "merged_reader got value"
       return val
       
-    
-    
--- example waitfree
-
--- a takes input
--- b takes input
--- either a or b
-
+trivialize' :: IO
+   (WithL (K ZeroT () :*: (K (SucT ZeroT) () :*: HNil)))
+   -> IO (WithL (IO (Maybe ()) :*: (IO (Maybe ()) :*: HNil)))
+trivialize' katamari1 = do
+  b2 <- newEmptyMVar
+  b3 <- newEmptyMVar
+  k <- katamari1
+  return $ trivialize b2 b3 k
 
