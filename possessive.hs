@@ -207,42 +207,6 @@ local f = return $ ([], (ret f') .*. HNil)
       return $ Just x
 
 
-rline :: IO (WithL ((K ZeroT String) :*: HNil))
-rline = local r
- where
-   r = do
-     putStrLn $ "Thread 0 requiring input: "
-     getLine
-
-
-rline' :: IO (WithL ((K (SucT ZeroT) String) :*: HNil))
-rline' = local r
- where
-   r = do
-     putStrLn $ "Thread 1 requiring input: "
-     getLine
-
-printOne :: Thread t => K t (String, String) -> IO (Maybe ())
-printOne (K (th, s0s1)) = do
-  s <- s0s1
-  case s of
-    Nothing -> do
-        putStrLn $ "Thread " ++ (show $ atid th) ++ " got nothing"
-        return Nothing
-    Just (s0, s1) -> do
-        putStrLn $ "Thread " ++ (show $ atid th) ++ " got: " ++ s0 ++ s1
-        return $ Just ()
-
-eitherPrint ::  WithL
-                (K ZeroT (String, String)
-                :*: (K (SucT ZeroT) (String, String) :*: HNil)) ->
-                WithL
-                (K ZeroT () :*: (K (SucT ZeroT) () :*: HNil))
-eitherPrint (s, HCons e0 (HCons e1 l)) = (s, HCons e0' (HCons e1' l))
-    where
-      e0' = extend printOne e0
-      e1' = extend printOne e1
-
 trivialize :: Thread t => Thread s => MVar () -> MVar () ->
     WithL (K t () :*: (K s () :*: HNil)) ->
     WithL (IO (Maybe ()) :*: IO (Maybe ()) :*: HNil)
@@ -325,7 +289,8 @@ comm x y = do
   cbox <- newEmptyMVar
   return $ comm_ abox cbox (s0, HCons (K (taT, ta)) l) (s1, HCons (K (scT, sc)) l')
 
-katamari2_library :: IO (WithL (K ZeroT () :*: (K (SucT ZeroT) () :*: HNil))) ->
+katamari2_library :: Thread s => Thread t =>
+                     IO (WithL (K s () :*: (K t () :*: HNil))) ->
                      IO (WithL (IO (Maybe ()) :*: (IO (Maybe ()) :*: HNil)))
 katamari2_library katamari1 = do
   b2 <- newEmptyMVar
