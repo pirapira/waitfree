@@ -243,8 +243,8 @@ eitherPrint (s, HCons e0 (HCons e1 l)) = (s, HCons e0' (HCons e1' l))
       e0' = extend printOne e0
       e1' = extend printOne e1
 
-trivialize :: MVar () -> MVar () ->
-    WithL (K ZeroT () :*: (K (SucT ZeroT) () :*: HNil)) ->
+trivialize :: Thread t => Thread s => MVar () -> MVar () ->
+    WithL (K t () :*: (K s () :*: HNil)) ->
     WithL (IO (Maybe ()) :*: IO (Maybe ()) :*: HNil)
 trivialize box0 box1 (s, HCons e0 (HCons e1 l)) = (news, HCons e0' (HCons e1' l))
     where
@@ -324,12 +324,6 @@ comm x y = do
   abox <- newEmptyMVar
   cbox <- newEmptyMVar
   return $ comm_ abox cbox (s0, HCons (K (taT, ta)) l) (s1, HCons (K (scT, sc)) l')
-
-cF :: IO
-      (WithL
-        (K ZeroT (String, String)
-           :*: (K (SucT ZeroT) (String, String) :*: HNil)))
-cF = comm rline rline'
 
 katamari2_library :: IO (WithL (K ZeroT () :*: (K (SucT ZeroT) () :*: HNil))) ->
                      IO (WithL (IO (Maybe ()) :*: (IO (Maybe ()) :*: HNil)))
