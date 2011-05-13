@@ -72,6 +72,7 @@ writeMVar box (Just v) = do
     _ <- tryPutMVar box v
     return ()
 writeMVar _ Nothing = return ()
+
              
 -- I guess the six thing come from this.   Maybe explicit weakening helps.
                 
