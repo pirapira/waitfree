@@ -76,47 +76,37 @@ writeMVar _ Nothing = return ()
              
 -- I guess the six thing come from this.   Maybe explicit weakening helps.
                 
-comm_ :: Show a => Show c => Thread t => Thread s => HAppend l l' l'' => MVar a -> MVar c ->
+comm_ :: Thread t => Thread s => HAppend l l' l'' => MVar a -> MVar c ->
         WithL ((K t a) :*: l) -> WithL ((K s c) :*: l') -> WithL ((K t (a, c)) :*: (K s (c, a)) :*: l'')
 comm_ abox cbox (s0, HCons (K (taT, ta)) l) (s1, HCons (K (scT, sc)) l') =
     (news, K (taT, tac) .*. K (scT, sca) .*. hAppend l l')
         where
           tac = do
-            putStrLn "TC taking"
             cval <- tryTakeMVar cbox
             case cval of
               Nothing -> do
-                        putStrLn "TC fail"
                         return Nothing
               Just cva -> do
-                        putStrLn "TC success"
                         aval <- takeMVar abox -- this should not block
                         return $ Just (aval, cva)
           sca = do
-            putStrLn "SA taking"
             aval <- tryTakeMVar abox
             case aval of
               Nothing -> do
-                       putStrLn "SA fail"
                        return Nothing
               Just ava -> do
-                       putStrLn "SA success"
                        cval <- takeMVar cbox
                        return $ Just (cval, ava)
           news = s0 ++ s1 ++ [ta_task] ++ [sc_task]
           ta_task = (atid taT,
                           do
                             ta' <- ta
-                            putStrLn $ "Thread " ++ (show $ atid taT) ++ "writing" ++ (show ta')
                             writeMVar abox ta'
-                            putStrLn $ "Thread " ++ (show $ atid taT) ++ "written" ++ (show ta')
                     )     
           sc_task = (atid scT,
                           do
                             sc' <- sc
-                            putStrLn $ "Thread " ++ (show $ atid scT) ++ "writing" ++ (show sc')
                             writeMVar cbox sc'
-                            putStrLn $ "Thread " ++ (show $ atid scT) ++ "written" ++ (show sc')
                     ) 
 
 data K t a = K (t, IO (Maybe a))
@@ -175,9 +165,7 @@ instance Thread t => MVComonad (K t) where
           writeMVar box x
           return x
         receiver = do 
-          putStrLn "waiting_for_remote_value"
           val <- tryTakeMVar box
-          putStrLn "got value"
           return val
     extend trans r = K (t, trans r)
 
@@ -225,7 +213,6 @@ type JobChannel = [IO ()]
 worker :: JobChannel -> MVar () -> IO ()
 worker [] fin = putMVar fin ()
 worker (hd : tl) fin = do
-  putStrLn "job---"
   hd
   worker tl fin
 
@@ -307,9 +294,7 @@ merge above = do
   return $ (s ++ [(-1, x >>= writeMVar box)] ++ [(-1, y >>= writeMVar box)], (HCons (reader box) l))
    where
     reader box = do
-      putStrLn "merged_reader"
       val <- tryTakeMVar box
-      putStrLn "merged_reader got value"
       return val
       
     
