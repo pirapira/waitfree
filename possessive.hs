@@ -1,6 +1,24 @@
 {-# LANGUAGE TypeOperators, MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances, UndecidableInstances #-}
 
-module Possessive where
+module Possessive ( ZeroT (ZeroT)
+                    , SucT (SucT)
+                    , HNil
+                    , HCons (HCons)
+                    , K (K)
+                    , (:*:)
+                    , single
+                    , Hyp
+                    , Thread
+                    , atid
+                    , WithL -- remove later
+                    , extend
+                    , finalize
+                    , merge
+                    , comm
+                  )
+    where
+
+-- how to export only certain things?    
 
 import Control.Concurrent (ThreadId, forkIO, killThread)
 import Control.Concurrent.MVar (MVar, tryPutMVar, putMVar, readMVar, newEmptyMVar, tryTakeMVar, takeMVar)
@@ -66,6 +84,8 @@ instance (HyperSequent l, HAppend l l' l'')
 type WithL a = ([L], a)
 -- first in [L] -> first in the queue
 -- the above effect -> should be first in the queue -> earlier in [L]
+
+type Hyp a = IO ([L], a)
 
 writeMVar :: MVar a -> Maybe a -> IO ()
 writeMVar box (Just v) = do
@@ -188,8 +208,8 @@ type L = (AbstractThreadId, IO ())
 ---
 --- Example
 ---
-local :: Thread t => IO a -> IO (WithL ((K t a) :*: HNil))
-local f = return $ ([], (ret f') .*. HNil)
+single :: Thread t => IO a -> IO (WithL ((K t a) :*: HNil))
+single f = return $ ([], (ret f') .*. HNil)
   where
     f' = do
       x <- f
@@ -266,10 +286,10 @@ threadWait (thid, fin) w = do
     killThread thid
     w
 
-comm :: (Thread s, Thread t, HAppend l l' l'', Show c, Show a) =>
+comm :: (Thread s, Thread t, HAppend l l' l'') =>
         IO ([L], HCons (K t a) l)
          -> IO ([L], HCons (K s c) l')
-         -> IO (WithL (K t (a, c) :*: (K s (c, a) :*: l'')))
+         -> IO ([L], (K t (a, c) :*: (K s (c, a) :*: l'')))
 comm x y = do
   (s0, HCons (K (taT, ta)) l) <- x
   (s1, HCons (K (scT, sc)) l') <- y
@@ -277,10 +297,10 @@ comm x y = do
   cbox <- newEmptyMVar
   return $ comm_ abox cbox (s0, HCons (K (taT, ta)) l) (s1, HCons (K (scT, sc)) l')
 
-katamari2_library :: Thread s => Thread t =>
+finalize :: Thread s => Thread t =>
                      IO (WithL (K s () :*: (K t () :*: HNil))) ->
                      IO (WithL (IO (Maybe ()) :*: (IO (Maybe ()) :*: HNil)))
-katamari2_library katamari1 = do
+finalize katamari1 = do
   b2 <- newEmptyMVar
   b3 <- newEmptyMVar
   k <- katamari1
