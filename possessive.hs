@@ -4,17 +4,18 @@ module Possessive ( ZeroT (ZeroT)
                     , SucT (SucT)
                     , HNil
                     , HCons (HCons)
-                    , K (K)
                     , (:*:)
+                    , K
                     , single
                     , Hyp
                     , Thread
-                    , atid
-                    , WithL -- remove later
+                    , name
                     , extend
                     , finalize
                     , merge
+                    , peek
                     , comm
+                    , execute
                   )
     where
 
@@ -27,19 +28,26 @@ import qualified Data.Map as Map
 data ZeroT = ZeroT
 data SucT t = SucT t
 
+newtype AbstractThreadId = AsATI Int deriving (Show, Eq, Ord)
+            
 -- xxx internal data for thread id's -- hidden
-type AbstractThreadId = Int
-
 class Thread t where
     t :: t
-    atid  :: t -> AbstractThreadId
+    atid :: t -> AbstractThreadId
+    name :: t -> String
 
 instance Thread ZeroT where
     t = ZeroT
-    atid ZeroT = 0
+    atid ZeroT = AsATI 0
+    name = show . atid
 instance Thread t => Thread (SucT t) where
     t = SucT t
-    atid (SucT x) = succ $ atid x
+    atid (SucT x) = case atid x of
+                      AsATI y -> AsATI (succ y)
+    name = show . atid
+
+--- how to make Thread as showable?
+--- and hide atid
 
 -- how to hide this implementation?
 -- K (writing_action)
@@ -129,7 +137,7 @@ comm_ abox cbox (s0, HCons (K (taT, ta)) l) (s1, HCons (K (scT, sc)) l') =
                             writeMVar cbox sc'
                     ) 
 
-data K t a = K (t, IO (Maybe a))
+newtype K t a = K (t, IO (Maybe a))
 
 class IOMaybeFunctor w where
   wmap :: (a -> IO (Maybe b)) -> w a -> w b
@@ -164,7 +172,7 @@ mute :: Thread t => K t a -> L
 mute (K (th, a)) = (atid th, a >>= \_ -> return ()) 
 
 mute' :: IO (Maybe ()) -> L
-mute' e = (-1, e >>= \_ -> return ())
+mute' e = (AsATI (-1), e >>= \_ -> return ())
 
 -- xxx add law for IOComonad
 
@@ -205,15 +213,17 @@ type L = (AbstractThreadId, IO ())
 -- waitfree :: K t a -> K s b -> Eigher (K t b) (K s a)
 -- waitfree = ?
 
----
---- Example
----
 single :: Thread t => IO a -> IO (WithL ((K t a) :*: HNil))
 single f = return $ ([], (ret f') .*. HNil)
   where
     f' = do
       x <- f
       return $ Just x
+
+
+peek :: Thread t => (t -> (Maybe a) -> IO b) -> K t a -> IO b 
+peek f (K (th, content)) = do
+  content >>= f th 
 
 
 trivialize :: Thread t => Thread s => MVar () -> MVar () ->
@@ -254,8 +264,12 @@ hypersequentToL (s, HCons e HNil) = s ++ [lastjob]
 --- What to do with [L]
 ---
 
-execute :: [L] -> IO ()
-execute = spawnPool >=> waitThread
+execute :: Hyp (IO (Maybe ()) :*: HNil) -> IO ()
+execute h =
+  fmap hypersequentToL h >>= execute'
+
+execute' :: [L] -> IO ()
+execute' = spawnPool >=> waitThread
 
 spawnPool :: [L] -> IO ThreadPool
 spawnPool = run . constructJobPool
@@ -306,18 +320,16 @@ finalize katamari1 = do
   k <- katamari1
   return $ trivialize b2 b3 k
 
-merge :: IO (WithL (IO (Maybe a) :*: (IO (Maybe a) :*: l)))
-       -> IO (WithL (IO (Maybe a) :*: l))
+merge :: Hyp (IO (Maybe a) :*: (IO (Maybe a) :*: l))
+       -> Hyp (IO (Maybe a) :*: l)
 merge above = do
   box <- newEmptyMVar
   (s, (HCons x (HCons y l))) <- above
-  return $ (s ++ [(-1, x >>= writeMVar box)] ++ [(-1, y >>= writeMVar box)], (HCons (reader box) l))
+  return $ (s ++ [(AsATI (-1), x >>= writeMVar box)] ++ [(AsATI (-1), y >>= writeMVar box)], (HCons (reader box) l))
    where
     reader box = do
       val <- tryTakeMVar box
       return val
-      
-    
     
 -- example waitfree
 
