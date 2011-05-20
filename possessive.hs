@@ -16,6 +16,9 @@ module Possessive ( ZeroT (ZeroT)
                     , peek
                     , comm
                     , execute
+                    , progress
+                    , hypReturn
+                    , cappy
                   )
     where
 
@@ -95,6 +98,10 @@ type WithL a = ([L], a)
 
 type Hyp a = IO ([L], a)
 
+--- arrangements on Hyp l helps
+--- when deconstructed, all contents of [L] belongs to head.
+--- or rather, split, do something, and merge kind of higher function??
+    
 writeMVar :: MVar a -> Maybe a -> IO ()
 writeMVar box (Just v) = do
     _ <- tryPutMVar box v
@@ -173,6 +180,8 @@ mute (K (th, a)) = (atid th, a >>= \_ -> return ())
 
 mute' :: IO (Maybe ()) -> L
 mute' e = (AsATI (-1), e >>= \_ -> return ())
+
+
 
 -- xxx add law for IOComonad
 
@@ -300,6 +309,28 @@ threadWait (thid, fin) w = do
     killThread thid
     w
 
+-- this is introduced in order to remove HCons
+progress_ :: (HyperSequent l, HyperSequent l') =>
+            (a -> b) -> (l -> IO ([L], l')) -> HCons a l -> 
+            IO ([L], HCons b l')
+progress_ hdf tlf (HCons ax bl) = do
+  (newls, newtl) <- tlf bl
+  return (newls, HCons (hdf ax) newtl)
+
+progress :: (Thread t, HyperSequent l, HyperSequent l') =>
+            (K t a -> IO (Maybe b)) -> (l -> Hyp l') ->
+            HCons (K t a) l -> Hyp (HCons (K t b) l')
+progress hdf = progress_ (extend hdf) 
+
+hypReturn :: HNil -> IO ([L], HNil)
+hypReturn _ = return ([], HNil)
+
+cappy :: (l -> Hyp l') -> Hyp l -> Hyp l'
+cappy f x = do
+  (ls, lx) <- x
+  (newls, newlx) <- f lx
+  return (ls ++ newls, newlx)
+    
 comm :: (Thread s, Thread t, HAppend l l' l'') =>
         IO ([L], HCons (K t a) l)
          -> IO ([L], HCons (K s c) l')
