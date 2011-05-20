@@ -7,7 +7,7 @@ module Possessive ( ZeroT (ZeroT)
                     , (:*:)
                     , K
                     , single
---                    , Hyp -- maybe should be eliminated with L only for finalization and MVar at runtime, so both are not needed.
+                    , Hyp -- this is OK
                     , Thread
                     , name
                     , extend
@@ -236,15 +236,6 @@ peek f (K (th, content)) = do
 
           
 
-trivialize :: Thread t => Thread s => MVar () -> MVar () ->
-    WithL (K t () :*: (K s () :*: HNil)) ->
-    WithL (IO (Maybe ()) :*: IO (Maybe ()) :*: HNil)
-trivialize box0 box1 (s, HCons e0 (HCons e1 l)) = (news, HCons e0' (HCons e1' l))
-    where
-      news = s ++ [mute k0] ++ [mute k1]
-      (k0, e0') = extract box0 e0
-      (k1, e1') = extract box1 e1
-
 
 -- these are internal
 
@@ -343,8 +334,25 @@ comm x y = do
   cbox <- newEmptyMVar
   return $ comm_ abox cbox (s0, HCons (K (taT, ta)) l) (s1, HCons (K (scT, sc)) l')
 
+-- I need the finalize function for every hypersequent
+trivialize :: Thread t => Thread s => MVar a -> MVar b ->
+    WithL (K t a :*: (K s b :*: HNil)) ->
+    WithL (IO (Maybe ()) :*: IO (Maybe ()) :*: HNil)
+trivialize box0 box1 (s, HCons e0 (HCons e1 l)) = (news, HCons (throw e0') (HCons (throw e1') l))
+    where
+      news = s ++ [mute k0] ++ [mute k1]
+      (k0, e0') = extract box0 e0
+      (k1, e1') = extract box1 e1
+
+throw :: IO (Maybe a) -> IO (Maybe ())
+throw a = do
+  x <- a
+  case x of
+    Nothing -> return Nothing
+    Just _ -> return $ Just ()
+
 finalize :: Thread s => Thread t =>
-                     IO (WithL (K s () :*: (K t () :*: HNil))) ->
+                     IO (WithL (K s a :*: (K t b :*: HNil))) ->
                      IO (WithL (IO (Maybe ()) :*: (IO (Maybe ()) :*: HNil)))
 finalize katamari1 = do
   b2 <- newEmptyMVar
