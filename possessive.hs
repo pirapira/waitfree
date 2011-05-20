@@ -3,11 +3,11 @@
 module Possessive ( ZeroT (ZeroT)
                     , SucT (SucT)
                     , HNil
-                    , HCons (HCons)
+                    , HCons
                     , (:*:)
                     , K
                     , single
-                    , Hyp
+--                    , Hyp -- maybe should be eliminated with L only for finalization and MVar at runtime, so both are not needed.
                     , Thread
                     , name
                     , extend
@@ -234,6 +234,7 @@ peek :: Thread t => (t -> (Maybe a) -> IO b) -> K t a -> IO b
 peek f (K (th, content)) = do
   content >>= f th 
 
+          
 
 trivialize :: Thread t => Thread s => MVar () -> MVar () ->
     WithL (K t () :*: (K s () :*: HNil)) ->
