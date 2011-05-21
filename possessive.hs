@@ -15,7 +15,6 @@ module Possessive ( ZeroT (ZeroT)
                     , comm
                     , execute
                     , progress
-                    , hypReturn
                     , cappy
                   )
     where
@@ -95,8 +94,9 @@ instance (HyperSequent l, HAppend l l' l'')
 
 newtype Hyp a = MakeHyp (IO ([L], a))
 
-hypReturn :: a -> Hyp a 
-hypReturn x = MakeHyp $ return ([], x)
+instance Monad Hyp where
+    return x = MakeHyp $ return ([], x)
+    (>>=) = flip cappy
 
 cappy :: (l -> Hyp l') -> Hyp l -> Hyp l'
 cappy f (MakeHyp x) = MakeHyp $ do
