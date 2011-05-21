@@ -74,7 +74,7 @@ e .*. l      = HCons e l
 
 class HyperSequent l
 instance HyperSequent HNil
-instance HyperSequent l => HyperSequent (HCons e l)
+instance HyperSequent l => HyperSequent (HCons (K t e) l)
 
 -- we need HAppend for describing comm
 class HAppend l l' l'' | l l' -> l''
@@ -255,6 +255,15 @@ type JobPool =
     Map.Map AbstractThreadId JobChannel
 
 --- Produce [L]
+class Lconvertible l where
+    htol :: l -> [L]
+
+instance Lconvertible HNil where
+    htol _ = []
+
+instance (Thread t, Lconvertible l) => Lconvertible (HCons (K t a) l) where
+    htol (HCons e rest) = mute e : htol rest
+
 hypersequentToL :: WithL (IO (Maybe ()) :*: HNil) -> [L]
 hypersequentToL (s, HCons e HNil) = s ++ [lastjob]
  where
