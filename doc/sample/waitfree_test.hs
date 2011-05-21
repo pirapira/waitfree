@@ -1,5 +1,7 @@
 {-# LANGUAGE TypeOperators #-}
 
+-- this listens on port 6000 and 6001.
+
 import Control.Concurrent.Waitfree
 import Network
 import IO (Handle, hSetBuffering, BufferMode (NoBuffering), hPutStrLn, hGetLine, hPutStr)
