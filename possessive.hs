@@ -226,8 +226,8 @@ type L = (AbstractThreadId, IO ())
 -- waitfree :: K t a -> K s b -> Eigher (K t b) (K s a)
 -- waitfree = ?
 
-single :: Thread t => IO a -> IO ([L], ((K t a) :*: HNil))
-single f = return $ ([], (ret f') .*. HNil)
+single :: Thread t => IO a -> Hyp ((K t a) :*: HNil)
+single f = MakeHyp $ return $ ([], (ret f') .*. HNil)
   where
     f' = do
       x <- f
@@ -237,8 +237,6 @@ single f = return $ ([], (ret f') .*. HNil)
 peek :: Thread t => (t -> (Maybe a) -> IO b) -> K t a -> IO b 
 peek f (K (th, content)) = do
   content >>= f th 
-
-          
 
 
 -- these are internal
@@ -327,10 +325,10 @@ progress hdf = progress_ (extend hdf)
 
 -- use Hyp 
 comm :: (Thread s, Thread t, HAppend l l' l'') =>
-        IO ([L], HCons (K t a) l)
-         -> IO ([L], HCons (K s c) l')
-         -> IO ([L], (K t (a, c) :*: (K s (c, a) :*: l'')))
-comm x y = do
+        Hyp (HCons (K t a) l)
+         -> Hyp (HCons (K s c) l')
+         -> Hyp (K t (a, c) :*: (K s (c, a) :*: l''))
+comm (MakeHyp x) (MakeHyp y) = MakeHyp $ do
   (s0, HCons (K (taT, ta)) l) <- x
   (s1, HCons (K (scT, sc)) l') <- y
   abox <- newEmptyMVar
