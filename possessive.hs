@@ -7,13 +7,13 @@ module Possessive ( ZeroT (ZeroT)
                     , (:*:)
                     , K
                     , single
-                    , Hyp -- this is OK
+                    , Hyp (MakeHyp) -- the constructor MakeHyp should be elminated
                     , Thread
                     , name
                     , extend
                     , peek
                     , comm
-                    , execute''
+                    , execute
                     , progress
                     , hypReturn
                     , cappy
@@ -93,17 +93,17 @@ instance (HyperSequent l, HAppend l l' l'')
 -- first in [L] -> first in the queue
 -- the above effect -> should be first in the queue -> earlier in [L]
 
-type Hyp a = IO ([L], a)
+newtype Hyp a = MakeHyp (IO ([L], a))
 
-hypReturn :: HNil -> IO ([L], HNil)
-hypReturn _ = return ([], HNil)
+hypReturn :: a -> Hyp a 
+hypReturn x = MakeHyp $ return ([], x)
 
 cappy :: (l -> Hyp l') -> Hyp l -> Hyp l'
-cappy f x = do
+cappy f (MakeHyp x) = MakeHyp $ do
   (ls, lx) <- x
-  (newls, newlx) <- f lx
-  return (ls ++ newls, newlx)
-    
+  let MakeHyp y = f lx in do
+    (newls, newlx) <- y
+    return (ls ++ newls, newlx)
 
 
 --- arrangements on Hyp l helps
@@ -274,8 +274,8 @@ hypersequentToL' (s, ls) = s ++ htol ls
 ---
 --- What to do with [L]
 ---
-execute'' :: Lconvertible l => Hyp l -> IO ()
-execute'' ls = do
+execute :: Lconvertible l => Hyp l -> IO ()
+execute (MakeHyp ls) = do
   withl <- ls
   execute' $ hypersequentToL' withl
 
@@ -313,17 +313,19 @@ threadWait (thid, fin) w = do
 
 -- this is introduced in order to remove HCons
 progress_ :: (HyperSequent l, HyperSequent l') =>
-            (a -> b) -> (l -> IO ([L], l')) -> HCons a l -> 
-            IO ([L], HCons b l')
-progress_ hdf tlf (HCons ax bl) = do
-  (newls, newtl) <- tlf bl
-  return (newls, HCons (hdf ax) newtl)
+            (a -> b) -> (l -> Hyp l') -> HCons a l -> 
+            Hyp (HCons b l')
+progress_ hdf tlf (HCons ax bl) = MakeHyp $ do
+  let MakeHyp x = tlf bl in do
+    (newls, newtl) <- x
+    return (newls, HCons (hdf ax) newtl)
 
 progress :: (Thread t, HyperSequent l, HyperSequent l') =>
             (K t a -> IO (Maybe b)) -> (l -> Hyp l') ->
             HCons (K t a) l -> Hyp (HCons (K t b) l')
 progress hdf = progress_ (extend hdf) 
 
+-- use Hyp 
 comm :: (Thread s, Thread t, HAppend l l' l'') =>
         IO ([L], HCons (K t a) l)
          -> IO ([L], HCons (K s c) l')
