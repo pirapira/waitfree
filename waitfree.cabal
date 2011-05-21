@@ -1,0 +1,14 @@
+Name:                waitfree
+Version:             0.0
+Description:         A wrapping library for waitfree comnputation.
+License-file:        LICENSE
+Author:              Yoichi Hirai
+Maintainer:          yhirai@pira.jp
+Build-Type:          Simple
+Cabal-version:	     >= 1.2
+
+Library
+  Hs-source-dirs:	     src
+  Build-depends:	     base, containers
+  Exposed-modules:
+    Control.Concurrent.Waitfree

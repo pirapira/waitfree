@@ -1,22 +1,22 @@
 {-# LANGUAGE TypeOperators, MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances, UndecidableInstances #-}
 
-module Possessive ( ZeroT
-                    , SucT
-                    , HNil
-                    , (:*:)
-                    , K
-                    , single
-                    , Hyp
-                    , Thread
-                    , t
-                    , atid
-                    , AbstractThreadId
-                    , name
-                    , peek
-                    , comm
-                    , execute
-                    , (-*-)
-                  )
+module Control.Concurrent.Waitfree
+    ( ZeroT
+    , SucT
+    , HNil
+    , (:*:)
+    , K
+    , single
+    , Hyp
+    , Thread
+    , t
+    , atid
+    , AbstractThreadId
+    , peek
+    , comm
+    , execute
+    , (-*-)
+    )
     where
 
 -- how to export only certain things?    
@@ -35,16 +35,13 @@ type AbstractThreadId = Int
 class Thread t where
     t :: t
     atid :: t -> AbstractThreadId
-    name :: t -> String
 
 instance Thread ZeroT where
     t = ZeroT
     atid ZeroT = 0
-    name = show . atid
 instance Thread t => Thread (SucT t) where
     t = SucT t
     atid (SucT x) = succ $ atid x
-    name = show . atid
 
 --- how to make Thread as showable?
 --- and hide atid
