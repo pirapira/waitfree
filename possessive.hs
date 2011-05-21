@@ -22,8 +22,9 @@ module Possessive ( ZeroT
 -- how to export only certain things?    
 
 import Control.Concurrent (ThreadId, forkIO, killThread)
-import Control.Concurrent.MVar (MVar, tryPutMVar, putMVar, readMVar, newEmptyMVar, tryTakeMVar, takeMVar)
+import Control.Concurrent.MVar (MVar, tryPutMVar, putMVar, readMVar, newEmptyMVar, tryTakeMVar)
 import qualified Data.Map as Map
+import Data.IORef (readIORef, newIORef, IORef, writeIORef)
 
 data ZeroT = ZeroT
 data SucT t = SucT t
@@ -120,37 +121,47 @@ writeMVar _ Nothing = return ()
 -- I guess the six thing come from this.   Maybe explicit weakening helps.
 -- self first
                 
-comm_ :: Thread t => Thread s => HAppend l l' l'' => MVar a -> MVar c ->
-        ([L], ((K t a) :*: l)) -> ([L], ((K s c) :*: l')) -> ([L], (K t (a, c)) :*: (K s (c, a) ):*: l'')
-comm_ abox cbox (s0, HCons (K (taT, ta)) l) (s1, HCons (K (scT, sc)) l') =
-    (news, K (taT, tac) .*. K (scT, sca) .*. hAppend l l')
+comm_ :: Thread t => Thread s => HAppend l l' l'' => MVar a -> MVar c -> IORef (Maybe b) -> IORef (Maybe d) ->
+        ([L], ((K t (b,a)) :*: l)) -> ([L], ((K s (d,c)) :*: l')) -> ([L], (K t (b,c)) :*: (K s (d,a) ):*: l'')
+comm_ abox cbox bbox dbox (s0, HCons (K (taT, tba)) l) (s1, HCons (K (scT, sdc)) l') =
+    (news, K (taT, tbc) .*. K (scT, sda) .*. hAppend l l')
         where
-          tac = do
+          tbc = do
             cval <- tryTakeMVar cbox
             case cval of
-              Nothing -> do
-                        return Nothing
+              Nothing ->  return Nothing
               Just cva -> do
-                        aval <- takeMVar abox -- this should not block
-                        return $ Just (aval, cva)
-          sca = do
+                        maybetb <- readIORef bbox
+                        case maybetb of
+                          Just tb -> return $ Just (tb, cva)
+                          Nothing -> return Nothing
+          sda = do
             aval <- tryTakeMVar abox
             case aval of
               Nothing -> do
                        return Nothing
               Just ava -> do
-                       cval <- takeMVar cbox
-                       return $ Just (cval, ava)
+                        maybesd <- readIORef dbox
+                        case maybesd of
+                          Nothing -> return Nothing
+                          Just sd -> return $ Just (sd, ava)
           news = s0 ++ s1 ++ [ta_task] ++ [sc_task]
           ta_task = (atid taT,
                           do
-                            ta' <- ta
-                            writeMVar abox ta'
+                            maybeba <- tba
+                            case maybeba of
+                              Nothing -> writeMVar abox Nothing
+                              Just (tb, ta) -> do
+                                           writeMVar abox $ Just ta
+                                           writeIORef bbox $ Just tb
                     )     
           sc_task = (atid scT,
                           do
-                            sc' <- sc
-                            writeMVar cbox sc'
+                            maybedc <- sdc
+                            case maybedc of
+                              Nothing -> writeMVar cbox Nothing
+                              Just (sd, sc) -> do writeMVar cbox $ Just sc
+                                                  writeIORef dbox $ Just sd
                     ) 
 
 newtype K t a = K (t, IO (Maybe a))
@@ -326,15 +337,17 @@ progress_ hdf tlf (HCons ax bl) = MakeHyp $ do
 
 -- use Hyp 
 comm :: (Thread s, Thread t, HAppend l l' l'') =>
-        Hyp (HCons (K t a) l)
-         -> Hyp (HCons (K s c) l')
-         -> Hyp (K t (a, c) :*: (K s (c, a) :*: l''))
+        Hyp (HCons (K t (b,a)) l)
+         -> Hyp (HCons (K s (d,c)) l')
+         -> Hyp (K t (b, c) :*: (K s (d, a) :*: l''))
 comm (MakeHyp x) (MakeHyp y) = MakeHyp $ do
   (s0, HCons (K (taT, ta)) l) <- x
   (s1, HCons (K (scT, sc)) l') <- y
   abox <- newEmptyMVar
   cbox <- newEmptyMVar
-  return $ comm_ abox cbox (s0, HCons (K (taT, ta)) l) (s1, HCons (K (scT, sc)) l')
+  bbox <- newIORef Nothing
+  dbox <- newIORef Nothing
+  return $ comm_ abox cbox bbox dbox (s0, HCons (K (taT, ta)) l) (s1, HCons (K (scT, sc)) l')
 
 
 
