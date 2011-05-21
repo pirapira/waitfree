@@ -11,11 +11,9 @@ module Possessive ( ZeroT (ZeroT)
                     , Thread
                     , name
                     , extend
-                    , finalize
-                    , merge
                     , peek
                     , comm
-                    , execute
+                    , execute''
                     , progress
                     , hypReturn
                     , cappy
@@ -178,10 +176,6 @@ class IOMaybeFunctor w => MVComonad w where
 mute :: Thread t => K t a -> L
 mute (K (th, a)) = (atid th, a >>= \_ -> return ()) 
 
-mute' :: IO (Maybe ()) -> L
-mute' e = (AsATI (-1), e >>= \_ -> return ())
-
-
 
 -- xxx add law for IOComonad
 
@@ -264,19 +258,16 @@ instance Lconvertible HNil where
 instance (Thread t, Lconvertible l) => Lconvertible (HCons (K t a) l) where
     htol (HCons e rest) = mute e : htol rest
 
-hypersequentToL :: WithL (IO (Maybe ()) :*: HNil) -> [L]
-hypersequentToL (s, HCons e HNil) = s ++ [lastjob]
- where
-   lastjob = mute' e
-
+hypersequentToL' :: Lconvertible l => WithL l -> [L]
+hypersequentToL' (s, ls) = s ++ htol ls
 
 ---
 --- What to do with [L]
 ---
-
-execute :: Hyp (IO (Maybe ()) :*: HNil) -> IO ()
-execute h =
-  fmap hypersequentToL h >>= execute'
+execute'' :: Lconvertible l => Hyp l -> IO ()
+execute'' ls = do
+  withl <- ls
+  execute' $ hypersequentToL' withl
 
 execute' :: [L] -> IO ()
 execute' = spawnPool >=> waitThread
@@ -343,47 +334,5 @@ comm x y = do
   cbox <- newEmptyMVar
   return $ comm_ abox cbox (s0, HCons (K (taT, ta)) l) (s1, HCons (K (scT, sc)) l')
 
--- I need the finalize function for every hypersequent
-trivialize :: Thread t => Thread s => MVar a -> MVar b ->
-    WithL (K t a :*: (K s b :*: HNil)) ->
-    WithL (IO (Maybe ()) :*: IO (Maybe ()) :*: HNil)
-trivialize box0 box1 (s, HCons e0 (HCons e1 l)) = (news, HCons (throw e0') (HCons (throw e1') l))
-    where
-      news = s ++ [mute k0] ++ [mute k1]
-      (k0, e0') = extract box0 e0
-      (k1, e1') = extract box1 e1
-
-throw :: IO (Maybe a) -> IO (Maybe ())
-throw a = do
-  x <- a
-  case x of
-    Nothing -> return Nothing
-    Just _ -> return $ Just ()
-
-finalize :: Thread s => Thread t =>
-                     IO (WithL (K s a :*: (K t b :*: HNil))) ->
-                     IO (WithL (IO (Maybe ()) :*: (IO (Maybe ()) :*: HNil)))
-finalize katamari1 = do
-  b2 <- newEmptyMVar
-  b3 <- newEmptyMVar
-  k <- katamari1
-  return $ trivialize b2 b3 k
-
-merge :: Hyp (IO (Maybe a) :*: (IO (Maybe a) :*: l))
-       -> Hyp (IO (Maybe a) :*: l)
-merge above = do
-  box <- newEmptyMVar
-  (s, (HCons x (HCons y l))) <- above
-  return $ (s ++ [(AsATI (-1), x >>= writeMVar box)] ++ [(AsATI (-1), y >>= writeMVar box)], (HCons (reader box) l))
-   where
-    reader box = do
-      val <- tryTakeMVar box
-      return val
-    
--- example waitfree
-
--- a takes input
--- b takes input
--- either a or b
 
 
