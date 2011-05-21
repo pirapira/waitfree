@@ -7,7 +7,7 @@ License-file:        LICENSE
 Author:              Yoichi Hirai
 Maintainer:          yhirai@pira.jp
 Build-Type:          Simple
-Cabal-version:	     >= 1.4
+Cabal-version:	     >= 1.6
 Category:	     System
 Source-Repository head
   type:		  git
