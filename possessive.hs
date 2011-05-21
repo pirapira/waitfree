@@ -90,11 +90,21 @@ instance (HyperSequent l, HAppend l l' l'')
 --- Hypersequent with box list and computation list
 --- 
 
-type WithL a = ([L], a)
 -- first in [L] -> first in the queue
 -- the above effect -> should be first in the queue -> earlier in [L]
 
 type Hyp a = IO ([L], a)
+
+hypReturn :: HNil -> IO ([L], HNil)
+hypReturn _ = return ([], HNil)
+
+cappy :: (l -> Hyp l') -> Hyp l -> Hyp l'
+cappy f x = do
+  (ls, lx) <- x
+  (newls, newlx) <- f lx
+  return (ls ++ newls, newlx)
+    
+
 
 --- arrangements on Hyp l helps
 --- when deconstructed, all contents of [L] belongs to head.
@@ -110,7 +120,7 @@ writeMVar _ Nothing = return ()
 -- I guess the six thing come from this.   Maybe explicit weakening helps.
                 
 comm_ :: Thread t => Thread s => HAppend l l' l'' => MVar a -> MVar c ->
-        WithL ((K t a) :*: l) -> WithL ((K s c) :*: l') -> WithL ((K t (a, c)) :*: (K s (c, a)) :*: l'')
+        ([L], ((K t a) :*: l)) -> ([L], ((K s c) :*: l')) -> ([L], (K t (a, c)) :*: (K s (c, a) ):*: l'')
 comm_ abox cbox (s0, HCons (K (taT, ta)) l) (s1, HCons (K (scT, sc)) l') =
     (news, K (taT, tac) .*. K (scT, sca) .*. hAppend l l')
         where
@@ -216,7 +226,7 @@ type L = (AbstractThreadId, IO ())
 -- waitfree :: K t a -> K s b -> Eigher (K t b) (K s a)
 -- waitfree = ?
 
-single :: Thread t => IO a -> IO (WithL ((K t a) :*: HNil))
+single :: Thread t => IO a -> IO ([L], ((K t a) :*: HNil))
 single f = return $ ([], (ret f') .*. HNil)
   where
     f' = do
@@ -258,7 +268,7 @@ instance Lconvertible HNil where
 instance (Thread t, Lconvertible l) => Lconvertible (HCons (K t a) l) where
     htol (HCons e rest) = mute e : htol rest
 
-hypersequentToL' :: Lconvertible l => WithL l -> [L]
+hypersequentToL' :: Lconvertible l => ([L], l) -> [L]
 hypersequentToL' (s, ls) = s ++ htol ls
 
 ---
@@ -314,15 +324,6 @@ progress :: (Thread t, HyperSequent l, HyperSequent l') =>
             HCons (K t a) l -> Hyp (HCons (K t b) l')
 progress hdf = progress_ (extend hdf) 
 
-hypReturn :: HNil -> IO ([L], HNil)
-hypReturn _ = return ([], HNil)
-
-cappy :: (l -> Hyp l') -> Hyp l -> Hyp l'
-cappy f x = do
-  (ls, lx) <- x
-  (newls, newlx) <- f lx
-  return (ls ++ newls, newlx)
-    
 comm :: (Thread s, Thread t, HAppend l l' l'') =>
         IO ([L], HCons (K t a) l)
          -> IO ([L], HCons (K s c) l')
