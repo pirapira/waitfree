@@ -1,21 +1,21 @@
 {-# LANGUAGE TypeOperators, MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances, UndecidableInstances #-}
 
-module Possessive ( ZeroT (ZeroT)
-                    , SucT (SucT)
+module Possessive ( ZeroT
+                    , SucT
                     , HNil
-                    , HCons
                     , (:*:)
                     , K
                     , single
-                    , Hyp (MakeHyp) -- the constructor MakeHyp should be elminated
+                    , Hyp
                     , Thread
+                    , t
+                    , atid
+                    , AbstractThreadId
                     , name
-                    , extend
                     , peek
                     , comm
                     , execute
-                    , progress
-                    , cappy
+                    , (-*-)
                   )
     where
 
@@ -28,7 +28,7 @@ import qualified Data.Map as Map
 data ZeroT = ZeroT
 data SucT t = SucT t
 
-newtype AbstractThreadId = AsATI Int deriving (Show, Eq, Ord)
+type AbstractThreadId = Int
             
 -- xxx internal data for thread id's -- hidden
 class Thread t where
@@ -38,12 +38,11 @@ class Thread t where
 
 instance Thread ZeroT where
     t = ZeroT
-    atid ZeroT = AsATI 0
+    atid ZeroT = 0
     name = show . atid
 instance Thread t => Thread (SucT t) where
     t = SucT t
-    atid (SucT x) = case atid x of
-                      AsATI y -> AsATI (succ y)
+    atid (SucT x) = succ $ atid x
     name = show . atid
 
 --- how to make Thread as showable?
@@ -64,6 +63,7 @@ data HCons e l = HCons e l
 
 infixr 5 :*:
 infixr 5 .*.
+infixr 4 -*-
 
 type e :*: l = HCons e l
 (.*.) :: e -> l -> HCons e l
@@ -118,6 +118,7 @@ writeMVar _ Nothing = return ()
 
              
 -- I guess the six thing come from this.   Maybe explicit weakening helps.
+-- self first
                 
 comm_ :: Thread t => Thread s => HAppend l l' l'' => MVar a -> MVar c ->
         ([L], ((K t a) :*: l)) -> ([L], ((K s c) :*: l')) -> ([L], (K t (a, c)) :*: (K s (c, a) ):*: l'')
@@ -318,10 +319,10 @@ progress_ hdf tlf (HCons ax bl) = MakeHyp $ do
     (newls, newtl) <- x
     return (newls, HCons (hdf ax) newtl)
 
-progress :: (Thread t, HyperSequent l, HyperSequent l') =>
+(-*-) :: (Thread t, HyperSequent l, HyperSequent l') =>
             (K t a -> IO (Maybe b)) -> (l -> Hyp l') ->
             HCons (K t a) l -> Hyp (HCons (K t b) l')
-progress hdf = progress_ (extend hdf) 
+(-*-) hdf = progress_ (extend hdf) 
 
 -- use Hyp 
 comm :: (Thread s, Thread t, HAppend l l' l'') =>
