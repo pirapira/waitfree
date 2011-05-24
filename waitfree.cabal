@@ -1,5 +1,5 @@
 Name:                waitfree
-Version:             0.0
+Version:             0.1
 Description:         A combinator library for asynchronous waitfree computation among forkIO threads.
 Synopsis: 	     A wrapping library for waitfree comnputation.
 License:	     MIT
