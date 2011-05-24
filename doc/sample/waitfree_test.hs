@@ -6,28 +6,36 @@ import Control.Concurrent.Waitfree
 import Network
 import IO (Handle, hSetBuffering, BufferMode (NoBuffering), hPutStrLn, hGetLine, hPutStr)
 
-rline :: Thread t => t -> Hyp ((K t ((Handle, String), String)) :*: HNil)
-rline th = single $ withSocketsDo $ do
-  s <- listenOn $ PortNumber $ fromIntegral (6000 + atid th)
+handle :: PortID -> IO Handle
+handle p = withSocketsDo $ do
+  s <- listenOn p
   (h,_,_) <- accept s
   hSetBuffering h NoBuffering
+  return h
+
+prepareHandle :: Thread t => PortID -> Hyp (K t Handle :*: HNil)
+prepareHandle p = single $ handle p
+
+readLine :: Thread t => t -> Maybe Handle -> IO (Maybe ((Handle, String), String))
+readLine _ Nothing = return Nothing
+readLine th (Just h) = do
   hPutStr h $ (show $ atid th) ++ " requiring input: "
   str <- hGetLine h
-  return ((h, str), str)
+  return $ Just ((h, str), str)
 
-printTaken_inner :: (Thread t) => t -> Maybe ((Handle, String), String) -> IO (Maybe ())
-printTaken_inner _ Nothing = return Nothing
-printTaken_inner th (Just ((handle, selfs), peers)) = do
-        hPutStrLn handle $ (show $ atid th) ++ " got: " ++ show (selfs, peers)
+readH :: Thread t => PortID -> Hyp (K t ((Handle, String), String) :*: HNil)
+readH p = prepareHandle p >>= (readLine -*- return)
+
+printTaken :: (Thread t) => t -> Maybe ((Handle, String), String) -> IO (Maybe ())
+printTaken _ Nothing = return Nothing
+printTaken th (Just ((h, selfs), peers)) = do
+        hPutStrLn h $ (show $ atid th) ++ " got: " ++ show (selfs, peers)
         return $ Just ()
-
-printPeeked :: Thread t => K t ((Handle, String), String) -> IO (Maybe ())
-printPeeked known = peek (printTaken_inner) known
 
 content ::  Hyp (K ZeroT () :*: (K (SucT ZeroT) () :*: HNil))
 content =
-    comm (rline t) (rline t) >>=
-    (printPeeked -*- printPeeked -*- return)
+    comm (readH $ PortNumber 6000) (readH $ PortNumber 6001) >>=
+    (printTaken -*- printTaken -*- return)
 
 main :: IO ()
 main = execute content

@@ -9,11 +9,8 @@ module Control.Concurrent.Waitfree
     , K
     , single
     , Hyp
-    , Thread
-    , t
-    , atid
+    , Thread (t, atid)
     , AbstractThreadId
-    , peek
     , comm
     , execute
     , (-*-)
@@ -120,9 +117,9 @@ infixr 4 -*-
 
 -- | extend a Hyp hypersequent with another computation
 (-*-) :: (Thread t, HyperSequent l, HyperSequent l') =>
-            (K t a -> IO (Maybe b)) -> (l -> Hyp l') ->
+            (t -> Maybe a -> IO (Maybe b)) -> (l -> Hyp l') ->
             HCons (K t a) l -> Hyp (HCons (K t b) l')
-(-*-) hdf = progress_ (extend hdf) 
+(-*-) hdf = progress_ (extend $ peek hdf) 
 
 
 -- | 'peek' allows to look at the result of a remote computation
