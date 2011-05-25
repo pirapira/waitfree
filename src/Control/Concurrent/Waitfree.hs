@@ -117,10 +117,15 @@ infixr 4 -*-
 
 -- | extend a Hyp hypersequent with another computation
 (-*-) :: (Thread t, HyperSequent l, HyperSequent l') =>
-            (t -> Maybe a -> IO (Maybe b)) -> (l -> Hyp l') ->
+            (t -> a -> IO b) -> (l -> Hyp l') ->
             HCons (K t a) l -> Hyp (HCons (K t b) l')
-(-*-) hdf = progress_ (extend $ peek hdf) 
+(-*-) hdf = progress_ (extend $ peek $ lmaybe hdf) 
 
+lmaybe :: (t -> a -> IO b) -> (t -> Maybe a -> IO (Maybe b))
+lmaybe _ _  Nothing = return Nothing
+lmaybe f th (Just x) =  do
+  y <- f th x
+  return $ Just y
 
 -- | 'peek' allows to look at the result of a remote computation
 peek :: Thread t => (t -> (Maybe a) -> IO b) -> K t a -> IO b 

@@ -16,21 +16,19 @@ handle p = withSocketsDo $ do
 prepareHandle :: Thread t => PortID -> Hyp (K t Handle :*: HNil)
 prepareHandle p = single $ handle p
 
-readLine :: Thread t => t -> Maybe Handle -> IO (Maybe ((Handle, String), String))
-readLine _ Nothing = return Nothing
-readLine th (Just h) = do
+readLine :: Thread t => t -> Handle -> IO ((Handle, String), String)
+readLine th h = do
   hPutStr h $ (show $ atid th) ++ " requiring input: "
   str <- hGetLine h
-  return $ Just ((h, str), str)
+  return ((h, str), str)
 
 readH :: Thread t => PortID -> Hyp (K t ((Handle, String), String) :*: HNil)
 readH p = prepareHandle p >>= (readLine -*- return)
 
-printTaken :: (Thread t) => t -> Maybe ((Handle, String), String) -> IO (Maybe ())
-printTaken _ Nothing = return Nothing
-printTaken th (Just ((h, selfs), peers)) = do
+printTaken :: (Thread t) => t -> ((Handle, String), String) -> IO ()
+printTaken th ((h, selfs), peers) = do
         hPutStrLn h $ (show $ atid th) ++ " got: " ++ show (selfs, peers)
-        return $ Just ()
+        return ()
 
 content ::  Hyp (K ZeroT () :*: (K (SucT ZeroT) () :*: HNil))
 content =
