@@ -30,10 +30,14 @@ printTaken th ((h, selfs), peers) = do
         hPutStrLn h $ (show $ atid th) ++ " got: " ++ show (selfs, peers)
         return ()
 
+twoPrints :: HCons (K ZeroT ((Handle, String), String))
+             (HCons (K (SucT ZeroT) ((Handle, String), String)) HNil)
+              -> Hyp (HCons (K ZeroT ()) (HCons (K (SucT ZeroT) ()) HNil))
+twoPrints = printTaken -*- printTaken -*- return
+               
 content ::  Hyp (K ZeroT () :*: (K (SucT ZeroT) () :*: HNil))
 content =
-    comm (readH $ PortNumber 6000) (readH $ PortNumber 6001) >>=
-    (printTaken -*- printTaken -*- return)
+    comm (readH $ PortNumber 6000) (readH $ PortNumber 6001) >>= twoPrints
 
 main :: IO ()
 main = execute content
