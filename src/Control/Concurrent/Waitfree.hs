@@ -135,9 +135,11 @@ peek f (K (th, content)) = do
 -- | 'comm' stands for communication.  'comm' combines two hypersequents with a communicating component from each hypersequent.
 comm :: (Thread s, Thread t, HAppend l l' l'') =>
         Hyp (HCons (K t (b,a)) l)
+         -> (t -> b -> IO ())
          -> Hyp (HCons (K s (d,c)) l')
+         -> (s -> d -> IO ())
          -> Hyp (K t (b, c) :*: (K s (d, a) :*: l''))
-comm (MakeHyp x) (MakeHyp y) = MakeHyp $ do
+comm (MakeHyp x) terror (MakeHyp y) serror = MakeHyp $ do
   (s0, HCons (K (taT, ta)) l) <- x
   (s1, HCons (K (scT, sc)) l') <- y
   abox <- newEmptyMVar
@@ -148,14 +150,22 @@ comm (MakeHyp x) (MakeHyp y) = MakeHyp $ do
 
 -- internal implementation of comm
 comm_ :: Thread t => Thread s => HAppend l l' l'' => MVar a -> MVar c -> IORef (Maybe b) -> IORef (Maybe d) ->
-        ([L], ((K t (b,a)) :*: l)) -> ([L], ((K s (d,c)) :*: l')) -> ([L], (K t (b,c)) :*: (K s (d,a) ):*: l'')
-comm_ abox cbox bbox dbox (s0, HCons (K (taT, tba)) l) (s1, HCons (K (scT, sdc)) l') =
+        ([L], ((K t (b,a)) :*: l)) -> (t -> b -> IO ()) ->
+        ([L], ((K s (d,c)) :*: l')) -> (s -> d -> IO ()) ->
+        ([L], (K t (b,c)) :*: (K s (d,a) ):*: l'')
+comm_ abox cbox bbox dbox (s0, HCons (K (taT, tba)) l) terror (s1, HCons (K (scT, sdc)) l') serror =
     (news, HCons (K (taT, tbc)) (HCons (K (scT, sda)) (hAppend l l')))
         where
           tbc = do
             cval <- tryTakeMVar cbox
             case cval of
-              Nothing -> return Nothing
+              Nothing -> do
+                        maybetb <- readIORef bbox
+                        case maybetb of
+                          Just tb -> do
+                            terror taT tb
+                            return Nothing
+                          Nothing -> error "this should not happen"
               Just cva -> do
                         maybetb <- readIORef bbox
                         case maybetb of
@@ -164,7 +174,13 @@ comm_ abox cbox bbox dbox (s0, HCons (K (taT, tba)) l) (s1, HCons (K (scT, sdc))
           sda = do
             aval <- tryTakeMVar abox
             case aval of
-              Nothing -> return Nothing
+              Nothing -> do
+                        maybesd <- readIORef dbox
+                        case maybesd of
+                          Just sd -> do
+                            serror scT sd
+                            return Nothing
+                          Nothing -> error "this should not happen"
               Just ava -> do
                         maybesd <- readIORef dbox
                         case maybesd of
