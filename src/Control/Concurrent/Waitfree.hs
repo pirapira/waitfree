@@ -144,7 +144,7 @@ comm (MakeHyp x) (MakeHyp y) = MakeHyp $ do
   cbox <- newEmptyMVar
   bbox <- newIORef Nothing
   dbox <- newIORef Nothing
-  return $ comm_ abox cbox bbox dbox (s0, HCons (K (taT, ta)) l) (s1, HCons (K (scT, sc)) l')
+  return $ comm_ abox cbox bbox dbox (s0, HCons (K (taT, ta)) l) terror (s1, HCons (K (scT, sc)) l') serror
 
 -- internal implementation of comm
 comm_ :: Thread t => Thread s => HAppend l l' l'' => MVar a -> MVar c -> IORef (Maybe b) -> IORef (Maybe d) ->
@@ -155,21 +155,20 @@ comm_ abox cbox bbox dbox (s0, HCons (K (taT, tba)) l) (s1, HCons (K (scT, sdc))
           tbc = do
             cval <- tryTakeMVar cbox
             case cval of
-              Nothing ->  return Nothing
+              Nothing -> return Nothing
               Just cva -> do
                         maybetb <- readIORef bbox
                         case maybetb of
                           Just tb -> return $ Just (tb, cva)
-                          Nothing -> return Nothing
+                          Nothing -> error "this should not happen"
           sda = do
             aval <- tryTakeMVar abox
             case aval of
-              Nothing -> do
-                       return Nothing
+              Nothing -> return Nothing
               Just ava -> do
                         maybesd <- readIORef dbox
                         case maybesd of
-                          Nothing -> return Nothing
+                          Nothing -> error "this should not happen"
                           Just sd -> return $ Just (sd, ava)
           news = s0 ++ s1 ++ [ta_task] ++ [sc_task]
           ta_task = (atid taT,
