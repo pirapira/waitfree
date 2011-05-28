@@ -27,17 +27,20 @@ readH p = prepareHandle p >>= (readLine -*- return)
 
 printTaken :: (Thread t) => t -> ((Handle, String), String) -> IO ()
 printTaken th ((h, selfs), peers) = do
-        hPutStrLn h $ (show $ atid th) ++ " got: " ++ show (selfs, peers)
+        hPutStrLn h $ "Thread " ++ (show $ atid th) ++ " got: " ++ show (selfs, peers)
         return ()
 
 twoPrints :: HCons (K ZeroT ((Handle, String), String))
              (HCons (K (SucT ZeroT) ((Handle, String), String)) HNil)
               -> Hyp (HCons (K ZeroT ()) (HCons (K (SucT ZeroT) ()) HNil))
 twoPrints = printTaken -*- printTaken -*- return
+
+rerror :: Thread t => t -> (Handle, a) -> IO ()
+rerror th (h, _) = hPutStrLn h $ "Thread " ++ (show $ atid th) ++ " failed to read peer's input."
                
 content ::  Hyp (K ZeroT () :*: (K (SucT ZeroT) () :*: HNil))
 content =
-    comm (readH $ PortNumber 6000) (readH $ PortNumber 6001) >>= twoPrints
+    comm (readH $ PortNumber 6000) rerror (readH $ PortNumber 6001) rerror >>= twoPrints
 
 main :: IO ()
 main = execute content

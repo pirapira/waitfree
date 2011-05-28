@@ -133,6 +133,7 @@ peek f (K (th, content)) = do
   content >>= f th 
 
 -- | 'comm' stands for communication.  'comm' combines two hypersequents with a communicating component from each hypersequent.
+-- | 'comm hypersequent1 error1 hypersequent2 error2' where 'error1' and 'error2' specifies what to do in case of read failure.
 comm :: (Thread s, Thread t, HAppend l l' l'') =>
         Hyp (HCons (K t (b,a)) l)
          -> (t -> b -> IO ())
