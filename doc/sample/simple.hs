@@ -35,8 +35,10 @@ twoPrints :: HCons (K ZeroT ((Handle, String), String))
               -> Hyp (HCons (K ZeroT ()) (HCons (K (SucT ZeroT) ()) HNil))
 twoPrints = printTaken -*- printTaken -*- return
 
-rerror :: Thread t => t -> (Handle, a) -> IO ()
-rerror th (h, _) = hPutStrLn h $ "Thread " ++ (show $ atid th) ++ " failed to read peer's input."
+rerror :: Thread t => t -> (Handle, a) -> IO ThreadStatus
+rerror th (h, _) = do
+  hPutStrLn h $ "Thread " ++ (show $ atid th) ++ " failed to read peer's input."
+  return Finished
                
 content ::  Hyp (K ZeroT () :*: (K (SucT ZeroT) () :*: HNil))
 content =
