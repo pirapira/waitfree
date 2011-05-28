@@ -8,10 +8,11 @@ module Control.Concurrent.Waitfree
     , (:*:)
     , K
     , single
-    , Hyp
     , Thread (t, atid)
     , AbstractThreadId
     , comm
+    , follows
+    , cycling
     , execute
     , (-*-)
     , ThreadStatus (TryAnotherJob, Finished)
@@ -22,9 +23,8 @@ module Control.Concurrent.Waitfree
 -- how to export only certain things?    
 
 import Control.Concurrent (ThreadId, forkIO, killThread)
-import Control.Concurrent.MVar (MVar, tryPutMVar, putMVar, readMVar, newEmptyMVar, tryTakeMVar)
+import Control.Concurrent.MVar (MVar, tryPutMVar, putMVar, readMVar, newEmptyMVar, tryTakeMVar, takeMVar)
 import qualified Data.Map as Map
-import Data.IORef (readIORef, newIORef, IORef, writeIORef)
 
 -- | An abstract representation of a thread.  Threads are actually implemented using 'forkIO'.
 class Thread t where
@@ -56,20 +56,20 @@ data JobStatus a = Having a | Done ThreadStatus
 newtype K t a = K (t, IO (JobStatus a))
 
 ---
---- Hypersequent
+--- IOersequent
 --- 
 
--- | 'HyperSequent' represents a sequence of remote computations, possibly owned by different threads.
--- | When a 'HyperSequent' is executed, at least one remote computation is successful.
-class HyperSequent l
+-- | 'IOerSequent' represents a sequence of remote computations, possibly owned by different threads.
+-- | When a 'IOerSequent' is executed, at least one remote computation is successful.
+class IOerSequent l
 
--- | 'HNil' is the empty 'HyperSequent'
+-- | 'HNil' is the empty 'IOerSequent'
 data HNil = HNil
-instance HyperSequent HNil
+instance IOerSequent HNil
 
--- | 'HCons (K t e)' adds a remote computation in front of a 'HyperSequent'
+-- | 'HCons (K t e)' adds a remote computation in front of a 'IOerSequent'
 data HCons e l = HCons e l
-instance HyperSequent l => HyperSequent (HCons (K t e) l)
+instance IOerSequent l => IOerSequent (HCons (K t e) l)
 
 -- | an abreviation for 'HCons'
 infixr 5 :*:
@@ -80,41 +80,50 @@ type e :*: l = HCons e l
 class HAppend l l' l'' | l l' -> l''
  where hAppend :: l -> l' -> l''
 
-instance HyperSequent l => HAppend HNil l l
+instance IOerSequent l => HAppend HNil l l
  where hAppend HNil = id
 
-instance (HyperSequent l, HAppend l l' l'')
+instance (IOerSequent l, HAppend l l' l'')
     => HAppend (HCons x l) l' (HCons x l'')
  where hAppend (HCons x l) = HCons x. hAppend l
 
+class HLast l a heads | l -> a, l -> heads
+ where hLast :: l -> (a, heads)
+
+instance HLast (HCons a HNil) a HNil
+    where hLast (HCons x HNil) = (x, HNil)
+
+instance (HLast (HCons lh ll) a heads) => (HLast (HCons b (HCons lh ll)) a (HCons b heads))
+    where hLast (HCons y rest) =
+              case hLast rest of
+                (x, oldheads) -> (x, HCons y oldheads)
+
+follows :: HAppend l l' l'' => IO l -> IO l' -> IO l''
+follows l0 l1 = do
+  h0 <- l0
+  h1 <- l1
+  return $ hAppend h0 h1
+
+cycling_ :: HLast l a heads => l -> HCons a heads
+cycling_ lst = case hLast lst of
+                (last_, heads) -> HCons last_ heads
+
+cycling :: HLast l last heads => IO l -> IO (HCons last heads)
+cycling = fmap cycling_
 
 ---
---- Hypersequent with box list and computation list
+--- IOersequent with box list and computation list
 --- 
 
 -- first in [L] -> first in the queue
 -- the above effect -> should be first in the queue -> earlier in [L]
 
--- | hypersequent is always put in 'Hyp' monad
-newtype Hyp a = MakeHyp (IO ([L], a))
-
-instance Monad Hyp where
-    return x = MakeHyp $ return ([], x)
-    (>>=) = flip cappy
-
-cappy :: (l -> Hyp l') -> Hyp l -> Hyp l'
-cappy f (MakeHyp x) = MakeHyp $ do
-  (ls, lx) <- x
-  let MakeHyp y = f lx in do
-    (newls, newlx) <- y
-    return (ls ++ newls, newlx)
-
 remote :: Thread t => IO (JobStatus a) -> K t a
 remote y = K (t, y)
 
--- | 'single' creates a Hyp hypersequent consisting of a single remote computation.
-single :: Thread t => (t -> IO a) -> Hyp ((K t a) :*: HNil)
-single f = MakeHyp $ return $ ([], HCons (remote f') HNil)
+-- | 'single' creates a IO hypersequent consisting of a single remote computation.
+single :: Thread t => (t -> IO a) -> IO (K t a :*: HNil)
+single f = return $ HCons (remote f') HNil
   where
     f' = do
       x <- f t
@@ -122,102 +131,91 @@ single f = MakeHyp $ return $ ([], HCons (remote f') HNil)
 
 infixr 4 -*-
 
--- | extend a Hyp hypersequent with another computation
-(-*-) :: (Thread t, HyperSequent l, HyperSequent l') =>
-            (t -> a -> IO b) -> (l -> Hyp l') ->
-            HCons (K t a) l -> Hyp (HCons (K t b) l')
+-- | extend a IO hypersequent with another computation
+(-*-) :: (Thread t, IOerSequent l, IOerSequent l') =>
+            (t -> a -> IO b) -> (l -> IO l') ->
+            HCons (K t a) l -> IO (HCons (K t b) l')
 (-*-) hdf = progress_ (extend $ peek $ lmaybe hdf) 
 
-lmaybe :: (t -> a -> IO b) -> (t -> JobStatus a -> IO (JobStatus b))
+lmaybe :: (t -> a -> IO b) -> t -> JobStatus a -> IO (JobStatus b)
 lmaybe _ _  (Done x) = return (Done x)
 lmaybe f th (Having x) =  do
   y <- f th x
   return $ Having y
 
 -- | 'peek' allows to look at the result of a remote computation
-peek :: Thread t => (t -> (JobStatus a) -> IO b) -> K t a -> IO b 
-peek f (K (th, content)) = do
-  content >>= f th 
+peek :: Thread t => (t -> JobStatus a -> IO b) -> K t a -> IO b 
+peek f (K (th, content)) = content >>= f th 
 
 -- | 'comm' stands for communication.  'comm' combines two hypersequents with a communicating component from each hypersequent.
 -- | 'comm hypersequent1 error1 hypersequent2 error2' where 'error1' and 'error2' specifies what to do in case of read failure.
 comm :: (Thread s, Thread t, HAppend l l' l'') =>
-        Hyp (HCons (K t (b,a)) l)
+        IO (HCons (K t (b,a)) l)
          -> (t -> b -> IO ThreadStatus)
-         -> Hyp (HCons (K s (d,c)) l')
+         -> IO (HCons (K s (d,c)) l')
          -> (s -> d -> IO ThreadStatus)
-         -> Hyp (K t (b, c) :*: (K s (d, a) :*: l''))
-comm (MakeHyp x) terror (MakeHyp y) serror = MakeHyp $ do
-  (s0, HCons (K (taT, ta)) l) <- x
-  (s1, HCons (K (scT, sc)) l') <- y
+         -> IO (K t (b, c) :*: (K s (d, a) :*: l''))
+comm x terror y serror = do
+  HCons (K (taT, ta)) l <- x
+  HCons (K (scT, sc)) l' <- y
   abox <- newEmptyMVar
   cbox <- newEmptyMVar
-  bbox <- newIORef Nothing
-  dbox <- newIORef Nothing
-  return $ comm_ abox cbox bbox dbox (s0, HCons (K (taT, ta)) l) terror (s1, HCons (K (scT, sc)) l') serror
+  bbox <- newEmptyMVar
+  dbox <- newEmptyMVar
+  return $ comm_ abox cbox bbox dbox (HCons (K (taT, ta)) l) terror (HCons (K (scT, sc)) l') serror
 
 -- internal implementation of comm
-comm_ :: Thread t => Thread s => HAppend l l' l'' => MVar a -> MVar c -> IORef (Maybe b) -> IORef (Maybe d) ->
-        ([L], ((K t (b,a)) :*: l)) -> (t -> b -> IO ThreadStatus) ->
-        ([L], ((K s (d,c)) :*: l')) -> (s -> d -> IO ThreadStatus) ->
-        ([L], (K t (b,c)) :*: (K s (d,a) ):*: l'')
-comm_ abox cbox bbox dbox (s0, HCons (K (taT, tba)) l) terror (s1, HCons (K (scT, sdc)) l') serror =
-    (news, HCons (K (taT, tbc)) (HCons (K (scT, sda)) (hAppend l l')))
+comm_ :: Thread t => Thread s => HAppend l l' l'' => MVar a -> MVar c -> MVar (JobStatus b) -> MVar (JobStatus d) ->
+        (K t (b,a) :*: l) -> (t -> b -> IO ThreadStatus) ->
+        (K s (d,c) :*: l') -> (s -> d -> IO ThreadStatus) ->
+        (K t (b,c) :*: K s (d,a) :*: l'')
+comm_ abox cbox bbox dbox (HCons (K (taT, tba)) l) terror (HCons (K (scT, sdc)) l') serror =
+    HCons (K (taT, tbc)) (HCons (K (scT, sda)) (hAppend l l'))
         where
           tbc = do
+            maybeba <- tba
+            case maybeba of
+              Done thStatus -> do writeMVar abox Nothing
+                                  putMVar bbox $ Done thStatus
+              Having (tb, ta) -> do
+                           writeMVar abox $ Just ta
+                           writeMVar bbox $ Just $ Having tb
             cval <- tryTakeMVar cbox
             case cval of
               Nothing -> do
-                        maybetb <- readIORef bbox
+                        maybetb <- takeMVar bbox
                         case maybetb of
-                          Just tb -> do
+                          Having tb -> do
                             terror_result <- terror taT tb
                             return $ Done terror_result
-                          Nothing -> error "this should not happen"
+                          Done x -> return $ Done x
               Just cva -> do
-                        maybetb <- readIORef bbox
+                        maybetb <- takeMVar bbox
                         case maybetb of
-                          Just tb -> return $ Having (tb, cva)
-                          Nothing -> error "this should not happen"
+                          Having tb -> return $ Having (tb, cva)
+                          Done x -> return $ Done x
           sda = do
+            maybedc <- sdc
+            case maybedc of
+              Done thStatus -> do writeMVar cbox Nothing
+                                  writeMVar dbox $ Just $ Done thStatus
+              Having (sd, sc) -> do
+                           writeMVar cbox $ Just sc
+                           writeMVar dbox $ Just $ Having sd
             aval <- tryTakeMVar abox
             case aval of
               Nothing -> do
-                        maybesd <- readIORef dbox
+                        maybesd <- takeMVar dbox
                         case maybesd of
-                          Just sd -> do
+                          Having sd -> do
                             serror_result <- serror scT sd
                             return $ Done serror_result
-                          Nothing -> error "this should not happen"
+                          Done x -> return $ Done x
               Just ava -> do
-                        maybesd <- readIORef dbox
+                        maybesd <- takeMVar dbox
                         case maybesd of
-                          Nothing -> error "this should not happen"
-                          Just sd -> return $ Having (sd, ava)
-          news = s0 ++ s1 ++ [ta_task] ++ [sc_task]
-          ta_task = (atid taT,
-                          do
-                            maybeba <- tba
-                            case maybeba of
-                              Done thStatus -> do writeMVar abox Nothing
-                                                  return thStatus
-                              Having (tb, ta) -> do
-                                           writeMVar abox $ Just ta
-                                           writeIORef bbox $ Just tb
-                                           return TryAnotherJob
-                    )     
-          sc_task = (atid scT,
-                          do
-                            maybedc <- sdc
-                            case maybedc of
-                              Done thStatus -> do writeMVar cbox Nothing
-                                                  return thStatus
-                              Having (sd, sc) -> do
-                                           writeMVar cbox $ Just sc
-                                           writeIORef dbox $ Just sd
-                                           return TryAnotherJob
-                    ) 
-
+                          Having sd -> return $ Having (sd, ava)
+                          Done x -> return $ Done x
 
 writeMVar :: MVar a -> Maybe a -> IO ()
 writeMVar box (Just v) = do
@@ -226,11 +224,11 @@ writeMVar box (Just v) = do
 writeMVar _ Nothing = return ()
 
 
--- | 'execute' executes a 'Hyp' hypersequent.
-execute :: Lconvertible l => Hyp l -> IO ()
-execute (MakeHyp ls) = do
+-- | 'execute' executes a 'IO' hypersequent.
+execute :: Lconvertible l => IO l -> IO ()
+execute ls = do
   withl <- ls
-  execute' $ hypersequentToL' withl
+  execute' $ htol withl
 
 -- below is internal
 
@@ -238,7 +236,7 @@ extend :: Thread t => (K t a -> IO (JobStatus b)) -> K t a -> K t b
 extend trans r = K (t, trans r)
 
 mute :: Thread t => K t a -> L
-mute (K (th, a)) = (atid th, a >>= \_ -> return Finished)
+mute (K (th, a)) = (atid th, a >>= \_ -> return TryAnotherJob)
 
 type JobChannel = [IO ThreadStatus]
 
@@ -267,9 +265,6 @@ instance Lconvertible HNil where
 
 instance (Thread t, Lconvertible l) => Lconvertible (HCons (K t a) l) where
     htol (HCons e rest) = mute e : htol rest
-
-hypersequentToL' :: Lconvertible l => ([L], l) -> [L]
-hypersequentToL' (s, ls) = s ++ htol ls
 
 ---
 --- What to do with [L]
@@ -307,15 +302,9 @@ threadWait (thid, fin) w = do
     w
 
 -- this is introduced in order to remove HCons
-progress_ :: (HyperSequent l, HyperSequent l') =>
-            (a -> b) -> (l -> Hyp l') -> HCons a l -> 
-            Hyp (HCons b l')
-progress_ hdf tlf (HCons ax bl) = MakeHyp $ do
-  let MakeHyp x = tlf bl in do
-    (newls, newtl) <- x
-    return (newls, HCons (hdf ax) newtl)
-
-
-
-
-
+progress_ :: (IOerSequent l, IOerSequent l') =>
+            (a -> b) -> (l -> IO l') -> HCons a l -> 
+            IO (HCons b l')
+progress_ hdf tlf (HCons ax bl) = do
+  newtl <- tlf bl
+  return $ HCons (hdf ax) newtl
