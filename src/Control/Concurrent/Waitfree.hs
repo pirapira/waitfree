@@ -106,11 +106,11 @@ remote :: Thread t => IO (Maybe a) -> K t a
 remote y = K (t, y)
 
 -- | 'single' creates a Hyp hypersequent consisting of a single remote computation.
-single :: Thread t => IO a -> Hyp ((K t a) :*: HNil)
+single :: Thread t => (t -> IO a) -> Hyp ((K t a) :*: HNil)
 single f = MakeHyp $ return $ ([], HCons (remote f') HNil)
   where
     f' = do
-      x <- f
+      x <- f t
       return $ Just x
 
 infixr 4 -*-

@@ -6,8 +6,8 @@ import Control.Concurrent.Waitfree
 import Network
 import IO (Handle, hSetBuffering, BufferMode (NoBuffering), hPutStrLn, hGetLine, hPutStr)
 
-handle :: PortID -> IO Handle
-handle p = withSocketsDo $ do
+handle :: PortID -> t -> IO Handle
+handle p _ = withSocketsDo $ do
   s <- listenOn p
   (h,_,_) <- accept s
   hSetBuffering h NoBuffering
