@@ -16,7 +16,6 @@ module Control.Concurrent.Waitfree
     , execute
     , (-*-)
     , ThreadStatus (TryAnotherJob, Finished)
-    , JobStatus (Having, Done)
     )
     where
 
@@ -51,6 +50,10 @@ data ThreadStatus = TryAnotherJob | Finished
 
 -- | JobStatus shows whether a job is finished or not.
 data JobStatus a = Having a | Done ThreadStatus
+
+jth2th :: JobStatus ThreadStatus -> ThreadStatus 
+jth2th (Having x) = x
+jth2th (Done x) = x
 
 -- | A value of type 'K t a' represents a remote computation returning 'a' that is performed by a thread 't'.
 newtype K t a = K (t, IO (JobStatus a))
@@ -118,8 +121,8 @@ cycling = fmap cycling_
 -- first in [L] -> first in the queue
 -- the above effect -> should be first in the queue -> earlier in [L]
 
-remote :: Thread t => IO (JobStatus a) -> K t a
-remote y = K (t, y)
+remote :: Thread t => IO a -> K t a
+remote y = K (t, fmap Having y)
 
 -- | 'single' creates a IO hypersequent consisting of a single remote computation.
 single :: Thread t => (t -> IO a) -> IO (K t a :*: HNil)
@@ -127,7 +130,7 @@ single f = return $ HCons (remote f') HNil
   where
     f' = do
       x <- f t
-      return $ Having x
+      return x
 
 infixr 4 -*-
 
@@ -235,9 +238,6 @@ execute ls = do
 extend :: Thread t => (K t a -> IO (JobStatus b)) -> K t a -> K t b
 extend trans r = K (t, trans r)
 
-mute :: Thread t => K t a -> L
-mute (K (th, a)) = (atid th, a >>= \_ -> return TryAnotherJob)
-
 type JobChannel = [IO ThreadStatus]
 
 worker :: JobChannel -> MVar () -> IO ()
@@ -263,8 +263,8 @@ class Lconvertible l where
 instance Lconvertible HNil where
     htol _ = []
 
-instance (Thread t, Lconvertible l) => Lconvertible (HCons (K t a) l) where
-    htol (HCons e rest) = mute e : htol rest
+instance (Thread t, Lconvertible l) => Lconvertible (HCons (K t ThreadStatus) l) where
+    htol (HCons (K (th, result)) rest) = (atid th, fmap jth2th result) : htol rest
 
 ---
 --- What to do with [L]

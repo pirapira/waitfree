@@ -37,9 +37,6 @@ two = comm hOwnId failOut hOwnId failOut
 putTwoResults :: (Thread s, Thread t, Thread u) => u -> (s,t) -> IO ThreadStatus
 putTwoResults owner (c0, c1) = putResult owner $ show $ [atid c0, atid c1]
 
-twoFin :: (Thread s, Thread t) => IO (HCons (K s ThreadStatus) (HCons (K t ThreadStatus) HNil))
-twoFin = two >>= (putTwoResults -*- putTwoResults -*- return)
-
 duplicateTwo :: t -> a -> IO (a,a)
 duplicateTwo _ x = return (x,x)
 
@@ -52,7 +49,7 @@ three_ :: IO
           (K ZeroT ((ZeroT, FirstT), SecondT)
             :*: (K SecondT (SecondT, (ZeroT, FirstT))
                  :*: HCons (K FirstT ((FirstT, ZeroT), (FirstT, ZeroT))) HNil))
-three_ = comm twoBeforeComm failOut hOwnId failOut
+three_ = comm twoBeforeComm putTwoResults hOwnId failOut
 
 
 three__ :: IO (HCons
@@ -68,7 +65,7 @@ three___ :: IO
                       :*: HCons
                             (K ZeroT ((ZeroT, FirstT), SecondT))
                             (HCons (K SecondT (SecondT, (ZeroT, FirstT))) HNil)))
-three___ = comm three__ failOut hOwnId failOut
+three___ = comm three__ putTwoResults hOwnId failOut
 
 printThreeResults0 :: (Thread u, Thread s, Thread t, Thread v) => u -> (s,(t,v)) -> IO ThreadStatus
 printThreeResults0 owner (c0, (c1, c2)) = putResult owner $ show $ [atid c0, atid c1, atid c2]
@@ -84,7 +81,14 @@ three :: IO
              (HCons
               (K ZeroT ThreadStatus) (HCons (K SecondT ThreadStatus) HNil))))
 three = three___ >>= (printThreeResults1 -*- printThreeResults0 -*- printThreeResults1 -*- printThreeResults0 -*- return)
-           
+
+twoLast :: IO (HCons (K FirstT ThreadStatus) (HCons (K SecondT ThreadStatus) HNil))
+twoLast = comm hOwnId putOneResult hOwnId putOneResult >>= (putTwoResults -*- putTwoResults -*- return)
+
+twoMid :: IO (HCons (K ZeroT ThreadStatus) (HCons (K SecondT ThreadStatus) HNil))
+twoMid = comm hOwnId putOneResult hOwnId failOut >>= (putTwoResults -*- putTwoResults -*- return)
+
+        
 main :: IO ()
-main = execute three
+main = execute (three `follows` twoMid `follows` twoLast)
 
